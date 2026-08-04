@@ -1,69 +1,112 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import { createRepo, listRepos, type Repository } from "@/lib/api";
+
+const STATUS_STYLES: Record<Repository["status"], string> = {
+  pending: "bg-neutral-200 text-neutral-700",
+  processing: "bg-amber-100 text-amber-800",
+  ready: "bg-emerald-100 text-emerald-800",
+  failed: "bg-red-100 text-red-800",
+};
+
+export default function HomePage() {
+  const [repos, setRepos] = useState<Repository[]>([]);
+  const [cloneUrl, setCloneUrl] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const refresh = async () => {
+    try {
+      setRepos(await listRepos());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      refresh();
+    }, 4000);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount; refresh() awaits before setting state
+    refresh();
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!cloneUrl.trim()) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await createRepo(cloneUrl.trim());
+      setCloneUrl("");
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
+    <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 px-6 py-16">
+      <header>
+        <h1 className="text-2xl font-semibold tracking-tight">Ambit</h1>
+        <p className="mt-1 text-sm text-neutral-500">
+          Ingest a repository, then chat with it once it&apos;s ready.
+        </p>
+      </header>
+
+      <form onSubmit={handleSubmit} className="flex gap-2">
+        <input
+          type="text"
+          value={cloneUrl}
+          onChange={(e) => setCloneUrl(e.target.value)}
+          placeholder="https://github.com/owner/repo.git"
+          className="flex-1 rounded-md border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-neutral-500"
         />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+        <button
+          type="submit"
+          disabled={submitting}
+          className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+        >
+          {submitting ? "Starting…" : "Ingest"}
+        </button>
+      </form>
+
+      {error && <p className="text-sm text-red-600">{error}</p>}
+
+      <section className="flex flex-col gap-2">
+        {loading && <p className="text-sm text-neutral-500">Loading…</p>}
+        {!loading && repos.length === 0 && (
+          <p className="text-sm text-neutral-500">No repositories yet — ingest one above.</p>
+        )}
+        {repos.map((repo) => (
+          <Link
+            key={repo.id}
+            href={repo.status === "ready" ? `/repos/${repo.id}` : "#"}
+            className={`flex items-center justify-between rounded-md border border-neutral-200 px-4 py-3 ${
+              repo.status === "ready" ? "hover:border-neutral-400" : "cursor-default opacity-80"
+            }`}
           >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+            <div>
+              <p className="text-sm font-medium">{repo.name}</p>
+              <p className="text-xs text-neutral-500">{repo.clone_url}</p>
+              {repo.frameworks.length > 0 && (
+                <p className="mt-1 text-xs text-neutral-400">{repo.frameworks.join(", ")}</p>
+              )}
+            </div>
+            <span className={`rounded-full px-2 py-1 text-xs font-medium ${STATUS_STYLES[repo.status]}`}>
+              {repo.status}
+            </span>
+          </Link>
+        ))}
+      </section>
     </div>
   );
 }
