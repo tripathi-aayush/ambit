@@ -79,7 +79,10 @@ async def search_repo(
     """Raw retrieval endpoint over code chunks only — kept for debugging.
     /chat below is the actual RAG pipeline (code + commits + PRs/issues)."""
     await _get_repo_or_404(repo_id, session)
-    query_embedding = embed_query(q)
+    try:
+        query_embedding = embed_query(q)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"embedding failed: {exc}") from exc
 
     distance = Chunk.embedding.cosine_distance(query_embedding).label("distance")
     result = await session.execute(
@@ -113,7 +116,15 @@ async def chat(repo_id: uuid.UUID, body: ChatRequest, session: AsyncSession = De
     question = body.messages[-1].content
     history = [(m.role, m.content) for m in body.messages[:-1]]
 
-    answer, sources = await answer_question(session, repo_id, question, history)
+    try:
+        answer, sources = await answer_question(session, repo_id, question, history)
+    except Exception as exc:
+        # Raised (not left to propagate) so this is handled by Starlette's
+        # ExceptionMiddleware, which runs inside CORSMiddleware — an
+        # exception that reaches the outer ServerErrorMiddleware instead
+        # produces a response with no CORS headers, which browsers report
+        # as an opaque "Failed to fetch" rather than a readable error.
+        raise HTTPException(status_code=502, detail=f"chat answer generation failed: {exc}") from exc
 
     return ChatResponse(
         answer=answer,

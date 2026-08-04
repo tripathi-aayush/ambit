@@ -71,10 +71,12 @@ async def retrieve(session: AsyncSession, repo_id: uuid.UUID, query: str, top_k:
     repo_rows = (await session.execute(repo_stmt)).all()
 
     for row in repo_rows:
+        # kind is rendered as its own label by callers (e.g. the frontend's
+        # KIND_LABELS) — don't repeat it here, just the identifying bit.
         if row.source_type == "commit":
-            label = f"commit {row.source_id[:8]}: {row.title}"
+            label = f"{row.source_id[:8]}: {row.title}"
         else:
-            label = f"{row.source_type.upper()} #{row.source_id}: {row.title}"
+            label = f"#{row.source_id}: {row.title}"
         hits.append(SourceHit(kind=row.source_type, label=label, content=row.content, url=row.url, distance=row.distance))
 
     hits.sort(key=lambda h: h.distance)
