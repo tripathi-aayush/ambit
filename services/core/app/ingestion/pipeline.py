@@ -20,15 +20,28 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Chunk, DependencyEdge, File, FileOwnership, FileSummary, Repository, Symbol
+from app.db.models import (
+    Chunk,
+    DependencyEdge,
+    File,
+    FileOwnership,
+    FileSummary,
+    RepoChunk,
+    Repository,
+    Symbol,
+)
 from app.db.session import async_session
 from app.embeddings import embed_documents
 from app.ingestion.chunking import chunk_file
+from app.ingestion.commits import get_recent_commits
+from app.ingestion.github_issues import fetch_issues_and_prs
 from app.ingestion.graph import build_dependency_graph
 from app.ingestion.ownership import compute_ownership
 from app.ingestion.parser import parse_symbols
 from app.ingestion.walker import WalkedFile, clone_for_ingestion, walk_repo
 from app.summarizer import summarize_file
+
+MAX_REPO_CHUNK_CHARS = 4000
 
 SUMMARY_CONCURRENCY = 5
 
@@ -184,6 +197,40 @@ async def run_ingestion(repo_id: uuid.UUID) -> None:
         except Exception as exc:
             await session.rollback()
             degraded_notes.append(f"chunk/embed failed: {exc}")
+
+        try:
+            repo_chunk_rows: list[tuple[str, str, str, str, str | None]] = []  # type, id, title, content, url
+
+            for commit in get_recent_commits(local_path):
+                content = f"{commit.subject}\n\n{commit.body}".strip()[:MAX_REPO_CHUNK_CHARS]
+                repo_chunk_rows.append(("commit", commit.sha, commit.subject, content, None))
+
+            for entry in await fetch_issues_and_prs(repository.clone_url):
+                content = f"{entry.title}\n\n{entry.body}".strip()[:MAX_REPO_CHUNK_CHARS]
+                repo_chunk_rows.append(
+                    (entry.source_type, str(entry.number), entry.title, content, entry.url)
+                )
+
+            texts = [row[3] for row in repo_chunk_rows]
+            repo_embeddings = embed_documents(texts) if texts else []
+            for (source_type, source_id, title, content, url), embedding in zip(
+                repo_chunk_rows, repo_embeddings
+            ):
+                session.add(
+                    RepoChunk(
+                        repository_id=repo_id,
+                        source_type=source_type,
+                        source_id=source_id,
+                        title=title,
+                        content=content,
+                        url=url,
+                        embedding=embedding,
+                    )
+                )
+            await session.commit()
+        except Exception as exc:
+            await session.rollback()
+            degraded_notes.append(f"commit/PR/issue ingestion failed: {exc}")
 
         try:
             sem = asyncio.Semaphore(SUMMARY_CONCURRENCY)
