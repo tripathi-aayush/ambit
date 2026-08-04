@@ -40,6 +40,9 @@ async def create_webhook(access_token: str, owner: str, repo: str, webhook_url: 
 
 
 def clone_repo(clone_url: str, dest_dir: Path) -> Path:
+    """Full clone, not shallow — ownership detection and commit-message
+    ingestion both read git log history, which a shallow (--depth 1) clone
+    truncates to a single commit."""
     dest_dir.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "clone", "--depth", "1", clone_url, str(dest_dir)], check=True)
+    subprocess.run(["git", "clone", clone_url, str(dest_dir)], check=True)
     return dest_dir
