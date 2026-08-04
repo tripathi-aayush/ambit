@@ -1,17 +1,18 @@
-"""LLM-generated per-file semantic summaries via Claude. Every summary is
-tagged source="inferred" with a self-reported confidence score — per the
-plan's "understands is a probabilistic LLM summary, not ground truth"
-caveat, never presented as verified fact.
+"""LLM-generated per-file semantic summaries. Every summary is tagged
+source="inferred" with a self-reported confidence score — per the plan's
+"understands is a probabilistic LLM summary, not ground truth" caveat,
+never presented as verified fact.
+
+Provider-agnostic: goes through app.llm.get_llm_client(), selected by
+LLM_PROVIDER (default groq — good rate limits for iterating on ingestion
+during development). Never import a provider SDK directly here.
 """
 
-import json
 from dataclasses import dataclass
 
-from anthropic import AsyncAnthropic
+from app.llm import get_llm_client
+from app.llm.base import LLMRefusalError
 
-from app.config import settings
-
-MODEL = "claude-opus-5"
 MAX_CONTENT_CHARS = 8000  # keep per-file summarization cheap; truncate long files
 
 SUMMARY_SCHEMA = {
@@ -29,15 +30,6 @@ SUMMARY_SCHEMA = {
     "required": ["summary", "confidence"],
     "additionalProperties": False,
 }
-
-_client: AsyncAnthropic | None = None
-
-
-def _get_client() -> AsyncAnthropic:
-    global _client
-    if _client is None:
-        _client = AsyncAnthropic(api_key=settings.anthropic_api_key)
-    return _client
 
 
 @dataclass
@@ -57,25 +49,19 @@ async def summarize_file(path: str, content: str) -> FileSummaryResult:
         f"File: {path}\n\n```\n{truncated}{truncation_note}\n```"
     )
 
-    client = _get_client()
-    response = await client.messages.create(
-        model=MODEL,
-        max_tokens=512,
-        output_config={"effort": "low", "format": {"type": "json_schema", "schema": SUMMARY_SCHEMA}},
-        messages=[{"role": "user", "content": prompt}],
-    )
+    client = get_llm_client()
 
-    if response.stop_reason == "refusal":
+    try:
+        data = await client.structured_completion(prompt, SUMMARY_SCHEMA, max_tokens=512)
+    except LLMRefusalError:
         return FileSummaryResult(
             summary="Summary unavailable: model declined to summarize this file.",
             confidence=0.0,
-            model=MODEL,
+            model=client.model_name,
         )
 
-    text = next((b.text for b in response.content if b.type == "text"), "{}")
-    data = json.loads(text)
     return FileSummaryResult(
         summary=data["summary"],
         confidence=float(data["confidence"]),
-        model=MODEL,
+        model=client.model_name,
     )
