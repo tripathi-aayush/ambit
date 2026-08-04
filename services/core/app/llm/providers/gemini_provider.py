@@ -26,3 +26,11 @@ class GeminiClient(LLMClient):
             ),
         )
         return response.parsed if response.parsed is not None else json.loads(response.text)
+
+    async def complete(self, prompt: str, max_tokens: int) -> str:
+        response = await self._client.aio.models.generate_content(
+            model=self.model_name,
+            contents=prompt,
+            config=types.GenerateContentConfig(max_output_tokens=max_tokens),
+        )
+        return response.text or ""

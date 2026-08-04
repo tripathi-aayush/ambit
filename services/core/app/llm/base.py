@@ -27,3 +27,10 @@ class LLMClient(ABC):
         """Returns a dict that satisfies `schema` (an object schema with
         "properties" and "required", as used elsewhere in this codebase)."""
         raise NotImplementedError
+
+    @abstractmethod
+    async def complete(self, prompt: str, max_tokens: int) -> str:
+        """Freeform prose completion — for chat answers, not JSON-schema-
+        constrained output. Raises LLMRefusalError on a provider-side
+        decline, same as structured_completion."""
+        raise NotImplementedError

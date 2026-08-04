@@ -23,3 +23,11 @@ class GroqClient(LLMClient):
             messages=[{"role": "user", "content": append_schema_instructions(prompt, schema)}],
         )
         return json.loads(response.choices[0].message.content)
+
+    async def complete(self, prompt: str, max_tokens: int) -> str:
+        response = await self._client.chat.completions.create(
+            model=self.model_name,
+            max_tokens=max_tokens,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.choices[0].message.content or ""
