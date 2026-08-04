@@ -1,0 +1,39 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ambit
+      POSTGRES_PASSWORD: ambit
+      POSTGRES_DB: ambit
+    ports:
+      - "5433:5432"
+    volumes:
+      - ambit_pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ambit"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  core:
+    build: ./services/core
+    env_file:
+      - ./services/core/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://ambit:ambit@postgres:5432/ambit
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  sandbox:
+    build: ./infra/sandbox
+    privileged: true
+    volumes:
+      - ambit_sandbox_docker:/var/lib/docker
+
+volumes:
+  ambit_pgdata:
+  ambit_sandbox_docker:
