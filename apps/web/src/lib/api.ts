@@ -29,6 +29,29 @@ export interface ChatResponse {
   not_enough_information: boolean;
 }
 
+export interface RepositoryDoc {
+  readme_markdown: string;
+  sequence_diagram_title: string;
+  sequence_diagram_mermaid: string;
+  model: string;
+  source: string;
+  created_at: string;
+}
+
+export interface DependencyEdge {
+  source_file_id: string;
+  target_file_id: string | null;
+  target_external_name: string | null;
+  edge_type: string;
+}
+
+export interface RepoFile {
+  id: string;
+  path: string;
+  language: string | null;
+  size_bytes: number;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
@@ -61,4 +84,16 @@ export function chat(repoId: string, messages: ChatMessage[]): Promise<ChatRespo
     method: "POST",
     body: JSON.stringify({ messages }),
   });
+}
+
+export function getArchitecture(repoId: string): Promise<RepositoryDoc> {
+  return request(`/repos/${repoId}/architecture`);
+}
+
+export function getGraph(repoId: string): Promise<DependencyEdge[]> {
+  return request(`/repos/${repoId}/graph`);
+}
+
+export function listFiles(repoId: string): Promise<RepoFile[]> {
+  return request(`/repos/${repoId}/files`);
 }

@@ -94,6 +94,7 @@ class Repository(Base):
 
     files: Mapped[list["File"]] = relationship(back_populates="repository", cascade="all, delete-orphan")
     repo_chunks: Mapped[list["RepoChunk"]] = relationship(cascade="all, delete-orphan")
+    doc: Mapped["RepositoryDoc"] = relationship(cascade="all, delete-orphan", uselist=False)
 
 
 class File(Base):
@@ -209,5 +210,25 @@ class RepoChunk(Base):
     content: Mapped[str] = mapped_column(String, nullable=False)
     url: Mapped[str | None] = mapped_column(String, nullable=True)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class RepositoryDoc(Base):
+    """Phase 4: LLM-generated architecture README + one sequence diagram.
+    Generated on-demand (first view of the architecture page), not during
+    ingestion — repos nobody looks at shouldn't pay the extra LLM cost.
+    Same "inferred" tagging convention as FileSummary."""
+
+    __tablename__ = "repository_docs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    repository_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("repositories.id"), nullable=False, unique=True)
+
+    readme_markdown: Mapped[str] = mapped_column(String, nullable=False)
+    sequence_diagram_title: Mapped[str] = mapped_column(String, nullable=False)
+    sequence_diagram_mermaid: Mapped[str] = mapped_column(String, nullable=False)
+    model: Mapped[str] = mapped_column(String, nullable=False)
+    source: Mapped[str] = mapped_column(String, nullable=False, default="inferred")
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

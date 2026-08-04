@@ -6,7 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.db.models import Chunk, DependencyEdge, File, Repository
+from app.architecture import generate_architecture_doc
+from app.db.models import Chunk, DependencyEdge, File, Repository, RepositoryDoc
 from app.db.session import get_session
 from app.embeddings import embed_query
 from app.ingestion.pipeline import create_pending_repository, run_ingestion
@@ -18,6 +19,7 @@ from app.schemas import (
     DependencyEdgeResponse,
     FileResponse,
     RepoIngestRequest,
+    RepositoryDocResponse,
     RepositoryResponse,
     SearchResultResponse,
 )
@@ -135,3 +137,32 @@ async def chat(repo_id: uuid.UUID, body: ChatRequest, session: AsyncSession = De
         ],
         not_enough_information=not sources,
     )
+
+
+@router.get("/{repo_id}/architecture", response_model=RepositoryDocResponse)
+async def get_architecture(repo_id: uuid.UUID, session: AsyncSession = Depends(get_session)):
+    """Generated on first view, then cached — see RepositoryDoc/architecture.py."""
+    repo = await _get_repo_or_404(repo_id, session)
+
+    existing = (
+        await session.execute(select(RepositoryDoc).where(RepositoryDoc.repository_id == repo_id))
+    ).scalar_one_or_none()
+    if existing is not None:
+        return existing
+
+    try:
+        doc = await generate_architecture_doc(session, repo)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"architecture generation failed: {exc}") from exc
+
+    record = RepositoryDoc(
+        repository_id=repo_id,
+        readme_markdown=doc.readme_markdown,
+        sequence_diagram_title=doc.sequence_diagram_title,
+        sequence_diagram_mermaid=doc.sequence_diagram_mermaid,
+        model=doc.model,
+    )
+    session.add(record)
+    await session.commit()
+    await session.refresh(record)
+    return record

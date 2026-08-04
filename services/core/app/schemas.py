@@ -133,3 +133,14 @@ class ChatResponse(BaseModel):
     answer: str
     sources: list[ChatSourceResponse]
     not_enough_information: bool
+
+
+class RepositoryDocResponse(BaseModel):
+    readme_markdown: str
+    sequence_diagram_title: str
+    sequence_diagram_mermaid: str
+    model: str
+    source: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
