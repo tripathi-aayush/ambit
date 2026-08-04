@@ -16,17 +16,28 @@ services:
       timeout: 3s
       retries: 10
 
+  opa:
+    image: openpolicyagent/opa:1.0.0
+    command: ["run", "--server", "--addr", "0.0.0.0:8181", "/policies"]
+    volumes:
+      - ./infra/opa/policies:/policies
+    ports:
+      - "8181:8181"
+
   core:
     build: ./services/core
     env_file:
       - ./services/core/.env
     environment:
       DATABASE_URL: postgresql+asyncpg://ambit:ambit@postgres:5432/ambit
+      OPA_URL: http://opa:8181
     ports:
       - "8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
+      opa:
+        condition: service_started
 
   sandbox:
     build: ./infra/sandbox
