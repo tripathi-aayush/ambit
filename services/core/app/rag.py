@@ -8,6 +8,7 @@ never called — more reliable than trusting a model to admit uncertainty,
 and cheaper.
 """
 
+import asyncio
 import uuid
 from dataclasses import dataclass
 
@@ -42,7 +43,7 @@ class SourceHit:
 
 
 async def retrieve(session: AsyncSession, repo_id: uuid.UUID, query: str, top_k: int = TOP_K) -> list[SourceHit]:
-    query_embedding = embed_query(query)
+    query_embedding = await asyncio.to_thread(embed_query, query)
 
     code_distance = Chunk.embedding.cosine_distance(query_embedding).label("distance")
     code_stmt = (

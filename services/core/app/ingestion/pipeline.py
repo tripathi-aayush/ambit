@@ -36,6 +36,7 @@ from app.ingestion.chunking import chunk_file
 from app.ingestion.commits import get_recent_commits
 from app.ingestion.github_issues import fetch_issues_and_prs
 from app.ingestion.graph import build_dependency_graph
+from app.ingestion.languages import LOCKFILE_NAMES
 from app.ingestion.ownership import compute_ownership
 from app.ingestion.parser import parse_symbols
 from app.ingestion.walker import WalkedFile, clone_for_ingestion, walk_repo
@@ -176,12 +177,14 @@ async def run_ingestion(repo_id: uuid.UUID) -> None:
             chunk_texts: list[str] = []
             chunk_meta: list[tuple[str, int, int | None, int | None]] = []
             for wf in walked_files:
+                if wf.path.rsplit("/", 1)[-1] in LOCKFILE_NAMES:
+                    continue
                 chunks = chunk_file(wf.language, wf.content, symbols_by_path.get(wf.path, []))
                 for idx, chunk in enumerate(chunks):
                     chunk_texts.append(chunk.content)
                     chunk_meta.append((wf.path, idx, chunk.start_line, chunk.end_line))
 
-            embeddings = embed_documents(chunk_texts) if chunk_texts else []
+            embeddings = await asyncio.to_thread(embed_documents, chunk_texts) if chunk_texts else []
             for (path, idx, start, end), text, embedding in zip(chunk_meta, chunk_texts, embeddings):
                 session.add(
                     Chunk(
@@ -212,7 +215,7 @@ async def run_ingestion(repo_id: uuid.UUID) -> None:
                 )
 
             texts = [row[3] for row in repo_chunk_rows]
-            repo_embeddings = embed_documents(texts) if texts else []
+            repo_embeddings = await asyncio.to_thread(embed_documents, texts) if texts else []
             for (source_type, source_id, title, content, url), embedding in zip(
                 repo_chunk_rows, repo_embeddings
             ):
@@ -237,7 +240,7 @@ async def run_ingestion(repo_id: uuid.UUID) -> None:
             summary_tasks = [
                 _summarize_with_limit(sem, wf.path, wf.content)
                 for wf in walked_files
-                if wf.language is not None
+                if wf.language is not None and wf.path.rsplit("/", 1)[-1] not in LOCKFILE_NAMES
             ]
             failures = 0
             for path, outcome in await asyncio.gather(*summary_tasks):

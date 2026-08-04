@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
@@ -80,7 +81,7 @@ async def search_repo(
     /chat below is the actual RAG pipeline (code + commits + PRs/issues)."""
     await _get_repo_or_404(repo_id, session)
     try:
-        query_embedding = embed_query(q)
+        query_embedding = await asyncio.to_thread(embed_query, q)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"embedding failed: {exc}") from exc
 

@@ -43,6 +43,20 @@ IGNORED_DIR_NAMES = {
     ".data",  # local repo-clone storage (see app.config.settings.repos_dir)
 }
 
+# Generated/vendored dependency manifests: walked (for language/framework
+# detection) but never chunked or summarized. Zero semantic value for chat,
+# and their content is actively harmful to embed — lockfile lines (hashes,
+# URLs, no whitespace) tokenize far denser than code or English, so a
+# lockfile chunk can pass a char-count budget check and still blow a real
+# per-request token cap. Found via a real ingestion failure: a single
+# uv.lock chunk of 13,635 characters caused a hard non-retryable rejection
+# from the embeddings API mid-batch, silently aborting the entire batch.
+LOCKFILE_NAMES = {
+    "uv.lock", "poetry.lock", "Pipfile.lock", "package-lock.json", "yarn.lock",
+    "pnpm-lock.yaml", "Cargo.lock", "Gemfile.lock", "composer.lock", "go.sum",
+    "mix.lock", "flake.lock",
+}
+
 _KNOWN_JS_FRAMEWORKS = {
     "react": "React",
     "next": "Next.js",
