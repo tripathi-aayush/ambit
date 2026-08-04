@@ -21,10 +21,25 @@ from app.llm import get_llm_client
 from app.llm.base import LLMRefusalError
 
 TOP_K = 8
-# Cosine distance is 0 (identical) to 2 (opposite); ~1 is unrelated. This is
-# a starting heuristic, not calibrated against real usage yet — tune once
-# there's real query traffic to look at.
-NOT_ENOUGH_INFO_DISTANCE = 0.6
+# Cosine distance is 0 (identical) to 2 (opposite); ~1 is unrelated.
+#
+# Calibrated against a real repo (not synthetic): specific, well-matched
+# questions ("how does risk scoring work") land at 0.31-0.47. Broad-but-
+# legitimate questions ("what tech stack is used", "what else do you know
+# about this repo") land at 0.62-0.76. Truly unrelated questions ("capital
+# of France", "recipe for tiramisu") land at 0.74-0.80. Those two ranges
+# overlap — there is no fixed distance that cleanly separates "broad but
+# real" from "unrelated" on this data, full stop. So this threshold is
+# deliberately loose: its only job is rejecting queries with nothing even
+# tangentially relevant indexed (very high distance). Distinguishing "weak
+# match" from "actually irrelevant" is left to the model, which can read
+# the content rather than just its embedding distance — the prompt (see
+# _build_prompt) explicitly instructs it to say so when the sources don't
+# answer the question. A wrong "here's my best guess" from the model is
+# recoverable (the sources are shown, so it's checkable); a wrong "not
+# enough information" when the answer was sitting right there is not — the
+# threshold errs toward the recoverable failure mode.
+NOT_ENOUGH_INFO_DISTANCE = 0.85
 
 NOT_ENOUGH_INFO_MESSAGE = (
     "I don't have enough indexed information about this repository to answer that "
@@ -93,8 +108,13 @@ def _build_prompt(question: str, history: list[tuple[str, str]], sources: list[S
     return (
         "You are a codebase assistant answering questions about a specific repository. "
         "Answer ONLY using the numbered sources below — do not use outside knowledge about "
-        "similarly-named projects or libraries. Cite sources inline using [1], [2], etc. "
-        "If the sources don't actually contain the answer, say so plainly instead of guessing.\n\n"
+        "similarly-named projects or libraries. Cite sources inline using [1], [2], etc.\n\n"
+        "The sources were found by similarity search and were not filtered for relevance — "
+        "some may be weak or unrelated matches. Judge relevance yourself: if a source doesn't "
+        "actually bear on the question, ignore it and don't cite it. If NONE of the sources "
+        "answer the question, say plainly that the indexed repository doesn't cover it — don't "
+        "guess or pad out an answer from unrelated sources. If the sources partially answer it, "
+        "answer what you can and say what's missing, rather than declining entirely.\n\n"
         f"Conversation so far:\n{history_block}\n\n"
         f"Sources:\n{source_blocks}\n\n"
         f"Question: {question}\n\nAnswer:"

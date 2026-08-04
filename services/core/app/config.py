@@ -11,8 +11,14 @@ class Settings(BaseSettings):
     llm_provider: str = "groq"
     anthropic_api_key: str = ""
     groq_api_key: str = ""
+    groq_api_keys_extra: str = ""  # comma-separated additional keys, failed over to on rate limit
     openai_api_key: str = ""
     gemini_api_key: str = ""
+
+    @property
+    def groq_api_keys(self) -> list[str]:
+        keys = [self.groq_api_key] + self.groq_api_keys_extra.split(",")
+        return [k.strip() for k in keys if k.strip()]
     github_client_id: str = ""
     github_client_secret: str = ""
     github_oauth_redirect_url: str = "http://localhost:8000/auth/github/callback"

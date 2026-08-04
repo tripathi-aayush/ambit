@@ -10,6 +10,11 @@ from app.ingestion.parser import SymbolResult
 
 MAX_CHUNK_CHARS = 4000
 FALLBACK_CHUNK_LINES = 60
+# Near-empty chunks ("# server package", a single import line, ...) produce
+# ambiguous embeddings that weakly match almost every query — found via a
+# real report where a 16-char chunk kept surfacing as a top-ish result for
+# unrelated questions, muddying the "not enough information" threshold.
+MIN_CHUNK_CHARS = 40
 
 
 @dataclass
@@ -35,11 +40,11 @@ def chunk_file(language: str | None, content: str, symbols: list[SymbolResult]) 
         return []
 
     if language not in PARSEABLE_LANGUAGES:
-        return _fixed_line_windows(lines)
+        return _drop_trivial(_fixed_line_windows(lines))
 
     top_level = [s for s in symbols if s.symbol_type in ("function", "class")]
     if not top_level:
-        return _fixed_line_windows(lines)
+        return _drop_trivial(_fixed_line_windows(lines))
 
     covered = set()
     chunks: list[ChunkResult] = []
@@ -56,7 +61,11 @@ def chunk_file(language: str | None, content: str, symbols: list[SymbolResult]) 
 
     leftover_lines = [line for i, line in enumerate(lines, start=1) if i not in covered]
     leftover_text = "\n".join(leftover_lines).strip()
-    if len(leftover_text) > 20:  # skip near-empty leftovers (blank lines, stray braces)
+    if len(leftover_text) >= MIN_CHUNK_CHARS:
         chunks.append(ChunkResult(leftover_text, None, None))
 
-    return chunks
+    return _drop_trivial(chunks)
+
+
+def _drop_trivial(chunks: list[ChunkResult]) -> list[ChunkResult]:
+    return [c for c in chunks if len(c.content) >= MIN_CHUNK_CHARS]

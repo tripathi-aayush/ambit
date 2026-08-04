@@ -1,11 +1,14 @@
 """Thin wrapper around Voyage AI — Anthropic's recommended embeddings
 partner (Claude itself has no embeddings endpoint).
 
-Voyage's unfunded free tier caps at 3 requests/minute AND 10K
-tokens/minute. Batches are built to respect the token cap (not just a
-fixed chunk count) and paced with a fixed delay between calls to respect
-the request cap — retrying the same oversized batch after a 429 does
-nothing, since it's the same too-large request every time.
+An unfunded account caps at 3 requests/minute AND 10K tokens/minute;
+a funded one does not hit either in normal use. Batches are built to
+respect the token cap regardless (not just a fixed chunk count) —
+retrying the same oversized batch after a 429 does nothing, since it's
+the same too-large request every time — but there's no blanket delay
+between batches. Pacing is purely reactive (retry-after-429), so a
+funded account ingests at full speed and an unfunded one still degrades
+gracefully instead of hammering a wall.
 
 Retrying does NOT help every failure, though: a single lockfile chunk
 (uv.lock, package-lock.json, ...) can be large enough on its own to blow
@@ -29,7 +32,6 @@ stare at "Thinking…" for minutes.
 """
 
 import logging
-import time
 
 import voyageai
 from tenacity import before_sleep_log, retry, retry_if_exception_type, stop_after_attempt, wait_fixed
@@ -40,10 +42,9 @@ logger = logging.getLogger("ambit.embeddings")
 
 MODEL = "voyage-3"
 MAX_BATCH_ITEMS = 128
-MAX_BATCH_TOKENS = 8000  # headroom under Voyage's unfunded-tier 10K TPM cap
+MAX_BATCH_TOKENS = 8000  # headroom under the unfunded tier's 10K TPM cap
 CHARS_PER_TOKEN_ESTIMATE = 4  # rough heuristic, not a real tokenizer — good enough for batch sizing
-INTER_BATCH_DELAY_SECONDS = 21  # just over the unfunded-tier 3-requests-per-minute window
-RATE_LIMIT_RETRY_WAIT_SECONDS = 21
+RATE_LIMIT_RETRY_WAIT_SECONDS = 21  # just over the unfunded tier's 3-requests-per-minute window
 
 _client: voyageai.Client | None = None
 
@@ -105,9 +106,7 @@ def embed_documents(texts: list[str]) -> list[list[float]]:
     embeddings: list[list[float]] = []
     batches = _token_aware_batches(texts)
     logger.info("embed_documents: %d texts -> %d batches", len(texts), len(batches))
-    for i, batch in enumerate(batches):
-        if i > 0:
-            time.sleep(INTER_BATCH_DELAY_SECONDS)  # pace to the 3 RPM cap, not just react to 429s
+    for batch in batches:
         embeddings.extend(_embed_batch_background(batch, "document"))
     return embeddings
 
