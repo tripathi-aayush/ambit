@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ambit.dev/schemas/action-object.schema.json",
+  "title": "ActionObject",
+  "description": "The single contract every adapter (web UI, Claude Code, CLI wrapper) speaks when submitting an agent-issued action to the Ambit runtime core.",
+  "type": "object",
+  "required": ["action_type", "target", "actor"],
+  "additionalProperties": false,
+  "properties": {
+    "action_type": {
+      "type": "string",
+      "enum": [
+        "file_write",
+        "file_delete",
+        "git_commit",
+        "git_push",
+        "shell_exec",
+        "db_migration"
+      ],
+      "description": "The kind of action being requested. Extend this enum (in lockstep on both sides) as new action types are needed."
+    },
+    "target": {
+      "type": "string",
+      "description": "The object being acted on: a file path, a branch name (for git_push), or a command string (for shell_exec)."
+    },
+    "actor": {
+      "type": "object",
+      "required": ["adapter", "agent_name"],
+      "additionalProperties": false,
+      "properties": {
+        "adapter": {
+          "type": "string",
+          "enum": ["web_ui", "claude_code", "cli_wrapper"],
+          "description": "Which of the three thin adapters submitted this action."
+        },
+        "agent_name": {
+          "type": "string",
+          "description": "The agent/model that issued the action, e.g. 'claude-sonnet-5'."
+        },
+        "user": {
+          "type": ["string", "null"],
+          "description": "Identifier (email/id) of the human operating the adapter, if known. Phase 1 has no session persistence, so this is caller-supplied and unverified."
+        }
+      }
+    },
+    "environment": {
+      "type": "string",
+      "enum": ["dev", "staging", "prod"],
+      "default": "dev",
+      "description": "Deployment environment context, used by the risk scorer."
+    },
+    "branch": {
+      "type": ["string", "null"],
+      "description": "Git branch context, if applicable."
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Action-type-specific detail (diff, command string, file content hash, migration SQL, etc.). Freeform by design.",
+      "additionalProperties": true
+    }
+  }
+}
