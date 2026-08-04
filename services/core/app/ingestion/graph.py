@@ -33,6 +33,11 @@ def _js_relative_to_candidates(source_file: str, target: str) -> list[str]:
 
     base = normpath(join(dirname(source_file), target))
     return [
+        # The import may already include its extension (`./App.tsx`,
+        # `./index.css`) — check the base path as-is before assuming one
+        # needs to be appended, otherwise this builds nonsense candidates
+        # like `src/App.tsx.ts`.
+        base,
         f"{base}.ts", f"{base}.tsx", f"{base}.js", f"{base}.jsx",
         f"{base}/index.ts", f"{base}/index.tsx", f"{base}/index.js",
     ]
