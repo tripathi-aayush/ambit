@@ -93,6 +93,7 @@ class Repository(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     files: Mapped[list["File"]] = relationship(back_populates="repository", cascade="all, delete-orphan")
+    repo_chunks: Mapped[list["RepoChunk"]] = relationship(cascade="all, delete-orphan")
 
 
 class File(Base):
@@ -189,3 +190,24 @@ class FileOwnership(Base):
     last_commit_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     file: Mapped["File"] = relationship(back_populates="ownership")
+
+
+class RepoChunk(Base):
+    """Repository-scoped embeddable content that isn't tied to a single
+    file: commit messages, PR/issue text. Separate from `chunks` (which is
+    file-scoped) rather than a nullable file_id, so the file relationship
+    on Chunk/File stays a real FK with real cascade semantics."""
+
+    __tablename__ = "repo_chunks"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    repository_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("repositories.id"), nullable=False)
+
+    source_type: Mapped[str] = mapped_column(String, nullable=False)  # commit | pr | issue
+    source_id: Mapped[str] = mapped_column(String, nullable=False)  # sha | PR number | issue number
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    content: Mapped[str] = mapped_column(String, nullable=False)
+    url: Mapped[str | None] = mapped_column(String, nullable=True)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
