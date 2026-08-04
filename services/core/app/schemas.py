@@ -36,3 +36,77 @@ class ApprovalDecisionRequest(BaseModel):
     approver: str
     decision: Literal["approved", "denied"]
     reason: Optional[str] = None
+
+
+class RepoIngestRequest(BaseModel):
+    clone_url: str
+
+
+class RepositoryResponse(BaseModel):
+    id: uuid.UUID
+    clone_url: str
+    name: str
+    status: str
+    error: Optional[str]
+    frameworks: list[str]
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class SymbolResponse(BaseModel):
+    id: uuid.UUID
+    symbol_type: str
+    name: str
+    detail: Optional[str]
+    start_line: int
+    end_line: int
+
+    model_config = {"from_attributes": True}
+
+
+class FileSummaryResponse(BaseModel):
+    summary_text: str
+    confidence: float
+    model: str
+    source: str
+
+    model_config = {"from_attributes": True}
+
+
+class FileOwnershipResponse(BaseModel):
+    author_name: str
+    author_email: str
+    commit_count: int
+    last_commit_at: Optional[datetime]
+
+    model_config = {"from_attributes": True}
+
+
+class FileResponse(BaseModel):
+    id: uuid.UUID
+    path: str
+    language: Optional[str]
+    size_bytes: int
+    symbols: list[SymbolResponse] = []
+    summary: Optional[FileSummaryResponse] = None
+    ownership: list[FileOwnershipResponse] = []
+
+    model_config = {"from_attributes": True}
+
+
+class DependencyEdgeResponse(BaseModel):
+    source_file_id: uuid.UUID
+    target_file_id: Optional[uuid.UUID]
+    target_external_name: Optional[str]
+    edge_type: str
+
+    model_config = {"from_attributes": True}
+
+
+class SearchResultResponse(BaseModel):
+    file_path: str
+    chunk_content: str
+    start_line: Optional[int]
+    end_line: Optional[int]
+    distance: float
