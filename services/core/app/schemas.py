@@ -110,3 +110,26 @@ class SearchResultResponse(BaseModel):
     start_line: Optional[int]
     end_line: Optional[int]
     distance: float
+
+
+class ChatMessageRequest(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class ChatRequest(BaseModel):
+    messages: list[ChatMessageRequest]
+
+
+class ChatSourceResponse(BaseModel):
+    kind: str
+    label: str
+    content: str
+    url: Optional[str]
+    distance: float
+
+
+class ChatResponse(BaseModel):
+    answer: str
+    sources: list[ChatSourceResponse]
+    not_enough_information: bool

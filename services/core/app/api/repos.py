@@ -9,7 +9,11 @@ from app.db.models import Chunk, DependencyEdge, File, Repository
 from app.db.session import get_session
 from app.embeddings import embed_query
 from app.ingestion.pipeline import create_pending_repository, run_ingestion
+from app.rag import answer_question
 from app.schemas import (
+    ChatRequest,
+    ChatResponse,
+    ChatSourceResponse,
     DependencyEdgeResponse,
     FileResponse,
     RepoIngestRequest,
@@ -72,9 +76,8 @@ async def get_graph(repo_id: uuid.UUID, session: AsyncSession = Depends(get_sess
 async def search_repo(
     repo_id: uuid.UUID, q: str, limit: int = 10, session: AsyncSession = Depends(get_session)
 ):
-    """Proves the pgvector retrieval pipeline works: embeds the query with
-    Voyage AI and does a cosine-distance nearest-neighbor search over the
-    repo's chunks. The RAG chat pipeline itself is Phase 3 scope."""
+    """Raw retrieval endpoint over code chunks only — kept for debugging.
+    /chat below is the actual RAG pipeline (code + commits + PRs/issues)."""
     await _get_repo_or_404(repo_id, session)
     query_embedding = embed_query(q)
 
@@ -96,3 +99,27 @@ async def search_repo(
         )
         for row in result.all()
     ]
+
+
+@router.post("/{repo_id}/chat", response_model=ChatResponse)
+async def chat(repo_id: uuid.UUID, body: ChatRequest, session: AsyncSession = Depends(get_session)):
+    """Stateless: the client holds conversation history and resends it each
+    turn. The last message must be from the user — that's the question this
+    turn answers; earlier messages are context only."""
+    await _get_repo_or_404(repo_id, session)
+    if not body.messages or body.messages[-1].role != "user":
+        raise HTTPException(status_code=400, detail="last message must have role 'user'")
+
+    question = body.messages[-1].content
+    history = [(m.role, m.content) for m in body.messages[:-1]]
+
+    answer, sources = await answer_question(session, repo_id, question, history)
+
+    return ChatResponse(
+        answer=answer,
+        sources=[
+            ChatSourceResponse(kind=s.kind, label=s.label, content=s.content[:500], url=s.url, distance=s.distance)
+            for s in sources
+        ],
+        not_enough_information=not sources,
+    )
