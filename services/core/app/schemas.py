@@ -38,6 +38,7 @@ class PlanResponse(BaseModel):
     status: str
     pr_url: Optional[str]
     error: Optional[str]
+    reverts_action_id: Optional[uuid.UUID]
     created_at: datetime
     actions: list[ActionResponse] = []
 

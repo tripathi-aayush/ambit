@@ -3,12 +3,15 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-from app.db.models import Action, Event
+from app.db.models import Action, Event, Plan
 from app.db.session import get_session
+from app.executor import run_ready_actions
 from app.models.action import ActionObject
 from app.pipeline import submit_action
-from app.schemas import ActionResponse, EventResponse
+from app.rollback import create_rollback_plan
+from app.schemas import ActionResponse, EventResponse, PlanResponse
 
 router = APIRouter(prefix="/actions", tags=["actions"])
 
@@ -45,3 +48,27 @@ async def get_action_events(action_id: uuid.UUID, session: AsyncSession = Depend
         select(Event).where(Event.action_id == action_id).order_by(Event.created_at)
     )
     return result.scalars().all()
+
+
+@router.post("/{action_id}/rollback", response_model=PlanResponse)
+async def rollback_action(action_id: uuid.UUID, session: AsyncSession = Depends(get_session)):
+    action = await session.get(Action, action_id)
+    if action is None:
+        raise HTTPException(status_code=404, detail="action not found")
+
+    try:
+        plan = await create_rollback_plan(session, action)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"rollback plan generation failed: {exc}") from exc
+
+    try:
+        await run_ready_actions(session, plan)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"rollback execution failed: {exc}") from exc
+
+    result = await session.execute(
+        select(Plan).where(Plan.id == plan.id).options(selectinload(Plan.actions))
+    )
+    return result.scalar_one()

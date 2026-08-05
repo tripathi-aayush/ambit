@@ -82,8 +82,16 @@ export interface Plan {
   status: PlanStatus;
   pr_url: string | null;
   error: string | null;
+  reverts_action_id: string | null;
   created_at: string;
   actions: Action[];
+}
+
+export interface ActionEvent {
+  id: string;
+  event_type: string;
+  payload: Record<string, unknown>;
+  created_at: string;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -161,4 +169,16 @@ export function decideApproval(
     method: "POST",
     body: JSON.stringify({ approver, decision, reason }),
   });
+}
+
+export function listAllActions(status?: ActionStatus): Promise<Action[]> {
+  return request(`/actions${status ? `?status=${status}` : ""}`);
+}
+
+export function getActionEvents(actionId: string): Promise<ActionEvent[]> {
+  return request(`/actions/${actionId}/events`);
+}
+
+export function rollbackAction(actionId: string): Promise<Plan> {
+  return request(`/actions/${actionId}/rollback`, { method: "POST" });
 }

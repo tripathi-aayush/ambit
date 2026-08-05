@@ -40,9 +40,15 @@ class Plan(Base):
     pr_url: Mapped[str | None] = mapped_column(String, nullable=True)
     error: Mapped[str | None] = mapped_column(String, nullable=True)
 
+    # Phase 6: set when this plan exists to undo a specific prior action
+    # (see rollback.py). NULL for a normal task-generated plan.
+    reverts_action_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("actions.id"), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
-    actions: Mapped[list["Action"]] = relationship(back_populates="plan", cascade="all, delete-orphan")
+    actions: Mapped[list["Action"]] = relationship(
+        back_populates="plan", foreign_keys="Action.plan_id", cascade="all, delete-orphan"
+    )
 
 
 class Action(Base):
@@ -75,7 +81,7 @@ class Action(Base):
 
     events: Mapped[list["Event"]] = relationship(back_populates="action", cascade="all, delete-orphan")
     approvals: Mapped[list["Approval"]] = relationship(back_populates="action", cascade="all, delete-orphan")
-    plan: Mapped["Plan"] = relationship(back_populates="actions")
+    plan: Mapped["Plan"] = relationship(back_populates="actions", foreign_keys="Action.plan_id")
 
 
 class Approval(Base):

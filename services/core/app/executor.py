@@ -61,14 +61,22 @@ async def _run_action(action: Action, wd: Path, plan: Plan, repo: Repository) ->
     """Returns an output payload to record on success; raises ExecutionError on failure."""
     if action.action_type == "file_write":
         target = wd / action.target
+        previous_content = target.read_text(encoding="utf-8") if target.exists() else None
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(action.action_metadata["content"], encoding="utf-8")
+        # Reassigned (not mutated in place) so SQLAlchemy detects the JSONB
+        # change. Kept on the action itself, not just the event payload, so
+        # Phase 6's diff view and rollback survive the plan's working
+        # directory being cleaned up later.
+        action.action_metadata = {**action.action_metadata, "previous_content": previous_content}
         return {"wrote_bytes": len(action.action_metadata["content"])}
 
     if action.action_type == "file_delete":
         target = wd / action.target
+        previous_content = target.read_text(encoding="utf-8") if target.exists() else None
         if target.exists():
             target.unlink()
+        action.action_metadata = {**action.action_metadata, "previous_content": previous_content}
         return {}
 
     if action.action_type == "shell_exec":
@@ -88,18 +96,36 @@ async def _run_action(action: Action, wd: Path, plan: Plan, repo: Repository) ->
         commit = subprocess.run(["git", "commit", "-m", message], cwd=str(wd), capture_output=True, text=True)
         if commit.returncode != 0:
             raise ExecutionError(f"git commit failed: {commit.stderr}")
-        return {"commit_output": commit.stdout}
+        sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=str(wd), capture_output=True, text=True, check=True
+        ).stdout.strip()
+        action.action_metadata = {**action.action_metadata, "commit_sha": sha}
+        return {"commit_output": commit.stdout, "commit_sha": sha}
 
     if action.action_type == "git_push":
         if not settings.github_token:
             raise ExecutionError("GITHUB_TOKEN is not configured — cannot push or open a PR")
+
+        base_branch = repo.default_branch or await get_default_branch(repo.clone_url, settings.github_token)
+        repo.default_branch = base_branch
+
+        # A revert (or any plan) whose net effect matches the base branch
+        # already has nothing to open a PR for — GitHub's API would 422 on
+        # this with a generic "No commits between X and Y", which is
+        # confusing to surface as a plan failure. Check first, since it's
+        # a legitimate outcome (e.g. reverting a change whose forward PR
+        # was never merged), not an error.
+        diff_count = subprocess.run(
+            ["git", "rev-list", f"{base_branch}..HEAD", "--count"], cwd=str(wd), capture_output=True, text=True
+        )
+        if diff_count.returncode == 0 and diff_count.stdout.strip() == "0":
+            return {"note": f"nothing to push — branch already matches '{base_branch}'"}
+
         try:
             push_branch(wd, plan.branch_name, repo.clone_url, settings.github_token)
         except subprocess.CalledProcessError as exc:
             raise ExecutionError(f"git push failed: {exc.stderr}") from exc
 
-        base_branch = repo.default_branch or await get_default_branch(repo.clone_url, settings.github_token)
-        repo.default_branch = base_branch
         pr = await create_pull_request(
             settings.github_token,
             repo.clone_url,

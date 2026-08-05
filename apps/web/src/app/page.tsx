@@ -56,7 +56,12 @@ export default function HomePage() {
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 px-6 py-16">
       <header>
-        <h1 className="text-2xl font-semibold tracking-tight">Ambit</h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-semibold tracking-tight">Ambit</h1>
+          <Link href="/timeline" className="text-sm text-neutral-500 hover:underline">
+            Timeline →
+          </Link>
+        </div>
         <p className="mt-1 text-sm text-neutral-500">
           Ingest a repository, then chat with it once it&apos;s ready.
         </p>
