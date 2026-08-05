@@ -15,10 +15,6 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     gemini_api_key: str = ""
 
-    @property
-    def groq_api_keys(self) -> list[str]:
-        keys = [self.groq_api_key] + self.groq_api_keys_extra.split(",")
-        return [k.strip() for k in keys if k.strip()]
     github_client_id: str = ""
     github_client_secret: str = ""
     github_oauth_redirect_url: str = "http://localhost:8000/auth/github/callback"
@@ -26,6 +22,11 @@ class Settings(BaseSettings):
 
     sandbox_container_name: str = "ambit-sandbox-1"
     plans_dir: str = "./.data/plans"
+
+    @property
+    def groq_api_keys(self) -> list[str]:
+        keys = [self.groq_api_key] + self.groq_api_keys_extra.split(",")
+        return [k.strip() for k in keys if k.strip()]
 
 
 settings = Settings()

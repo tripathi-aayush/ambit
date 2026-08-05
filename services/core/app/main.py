@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.actions import router as actions_router
+from app.api.analytics import router as analytics_router
 from app.api.approvals import router as approvals_router
 from app.api.github import router as github_router
 from app.api.health import router as health_router
@@ -44,3 +45,4 @@ app.include_router(actions_router)
 app.include_router(approvals_router)
 app.include_router(repos_router)
 app.include_router(plans_router)
+app.include_router(analytics_router)

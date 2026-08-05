@@ -4,6 +4,8 @@ import Link from "next/link";
 import { use, useEffect, useMemo, useState } from "react";
 import ReactFlow, { Background, Controls, type Edge, type Node } from "reactflow";
 import "reactflow/dist/style.css";
+import { RiskLabel, StatusPill } from "@/components/badges";
+import { RepoNav } from "@/components/RepoNav";
 import {
   createPlan,
   decideApproval,
@@ -15,7 +17,9 @@ import {
   type Repository,
 } from "@/lib/api";
 
-const STATUS_COLORS: Record<Action["status"], { bg: string; border: string }> = {
+// React Flow node fill/border, distinct from the shared pill-badge palette
+// in components/badges.tsx -- this is graph-node styling, not a badge.
+const NODE_STATUS_COLORS: Record<Action["status"], { bg: string; border: string }> = {
   pending: { bg: "#fef3c7", border: "#d97706" },
   approved: { bg: "#dbeafe", border: "#2563eb" },
   executing: { bg: "#fde68a", border: "#d97706" },
@@ -24,17 +28,11 @@ const STATUS_COLORS: Record<Action["status"], { bg: string; border: string }> = 
   denied: { bg: "#fee2e2", border: "#dc2626" },
 };
 
-const RISK_COLORS: Record<string, string> = {
-  low: "text-green-700",
-  medium: "text-amber-700",
-  high: "text-red-700",
-};
-
 function ActionDag({ actions, onDecide }: { actions: Action[]; onDecide: (a: Action, decision: "approved" | "denied") => void }) {
   const { nodes, edges } = useMemo(() => {
     const columns = Math.max(1, Math.ceil(Math.sqrt(actions.length)));
     const nodes: Node[] = actions.map((a, i) => {
-      const colors = STATUS_COLORS[a.status];
+      const colors = NODE_STATUS_COLORS[a.status];
       return {
         id: a.id,
         data: { label: `${a.action_type}\n${a.target || "(auto)"}\n${a.status}` },
@@ -60,7 +58,7 @@ function ActionDag({ actions, onDecide }: { actions: Action[]; onDecide: (a: Act
     <div style={{ height: 320 }} className="rounded-md border border-neutral-200">
       <ReactFlow nodes={nodes} edges={edges} fitView>
         <Background />
-        <Controls />
+        <Controls position="top-right" />
       </ReactFlow>
     </div>
   );
@@ -77,6 +75,7 @@ export default function TasksPage({ params }: { params: Promise<{ id: string }> 
   const [error, setError] = useState<string | null>(null);
   const [decidingId, setDecidingId] = useState<string | null>(null);
   const [environment, setEnvironment] = useState<"dev" | "staging" | "prod">("dev");
+  const [plansLoading, setPlansLoading] = useState(true);
 
   const selected = plans.find((p) => p.id === selectedId) ?? null;
 
@@ -86,7 +85,8 @@ export default function TasksPage({ params }: { params: Promise<{ id: string }> 
         setPlans(ps);
         if (ps.length > 0 && !selectedId) setSelectedId(ps[0].id);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+      .finally(() => setPlansLoading(false));
   };
 
   useEffect(() => {
@@ -138,15 +138,7 @@ export default function TasksPage({ params }: { params: Promise<{ id: string }> 
           ← All repositories
         </Link>
         <h1 className="text-lg font-semibold">{repo?.name ?? "…"}</h1>
-        <nav className="mt-2 flex gap-4 text-sm">
-          <Link href={`/repos/${id}`} className="text-neutral-500 hover:underline">
-            Chat
-          </Link>
-          <Link href={`/repos/${id}/architecture`} className="text-neutral-500 hover:underline">
-            Architecture
-          </Link>
-          <span className="font-medium text-neutral-900">Tasks</span>
-        </nav>
+        <RepoNav repoId={id} active="tasks" />
       </header>
 
       <form onSubmit={handleSubmit} className="mb-6 flex gap-2">
@@ -180,7 +172,8 @@ export default function TasksPage({ params }: { params: Promise<{ id: string }> 
 
       <div className="flex gap-6">
         <aside className="w-56 shrink-0 space-y-1 text-sm">
-          {plans.length === 0 && <p className="text-neutral-500">No tasks submitted yet.</p>}
+          {plansLoading && <p className="text-neutral-400">Loading…</p>}
+          {!plansLoading && plans.length === 0 && <p className="text-neutral-500">No tasks submitted yet.</p>}
           {plans.map((p) => (
             <button
               key={p.id}
@@ -190,10 +183,7 @@ export default function TasksPage({ params }: { params: Promise<{ id: string }> 
               }`}
               title={p.task_description}
             >
-              <span className={p.status === "failed" ? "text-red-600" : p.status === "completed" ? "text-green-700" : "text-neutral-700"}>
-                {p.status}
-              </span>{" "}
-              — {p.task_description}
+              <StatusPill status={p.status} /> <span className="text-neutral-700">{p.task_description}</span>
             </button>
           ))}
         </aside>
@@ -235,8 +225,8 @@ export default function TasksPage({ params }: { params: Promise<{ id: string }> 
                         </p>
                         <p className="text-neutral-600">{String(a.action_metadata.description ?? "")}</p>
                         {a.risk_level && (
-                          <p className={`mt-1 ${RISK_COLORS[a.risk_level] ?? ""}`}>
-                            risk: {a.risk_level} ({a.risk_score})
+                          <p className="mt-1">
+                            risk: <RiskLabel level={a.risk_level} score={a.risk_score} />
                           </p>
                         )}
                       </div>

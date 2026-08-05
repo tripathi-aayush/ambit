@@ -9,7 +9,6 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@monaco-editor/react": "^4.7.0",
     "@types/diff": "^7.0.2",
     "diff": "^9.0.0",
     "mermaid": "^11.16.1",

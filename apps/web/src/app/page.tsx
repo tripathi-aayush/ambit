@@ -58,9 +58,14 @@ export default function HomePage() {
       <header>
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-semibold tracking-tight">Ambit</h1>
-          <Link href="/timeline" className="text-sm text-neutral-500 hover:underline">
-            Timeline →
-          </Link>
+          <div className="flex gap-4 text-sm">
+            <Link href="/timeline" className="text-neutral-500 hover:underline">
+              Timeline →
+            </Link>
+            <Link href="/analytics" className="text-neutral-500 hover:underline">
+              Analytics →
+            </Link>
+          </div>
         </div>
         <p className="mt-1 text-sm text-neutral-500">
           Ingest a repository, then chat with it once it&apos;s ready.

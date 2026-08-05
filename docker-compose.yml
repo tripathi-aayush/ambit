@@ -32,8 +32,20 @@ services:
       DATABASE_URL: postgresql+asyncpg://ambit:ambit@postgres:5432/ambit
       OPA_URL: http://opa:8181
       REPOS_DIR: /data/repos
+      PLANS_DIR: /plans
     volumes:
       - ambit_repos_data:/data/repos
+      # Same host directory the sandbox service bind-mounts below -- core
+      # writes plan clones here, and the sandbox's runner.py needs to see
+      # the exact same files under its own /plans to copy them into a test
+      # container. Must be this literal host path on both sides, not two
+      # separate named volumes (those wouldn't share content).
+      - ./services/core/.data/plans:/plans
+      # core invokes `docker exec` into the sandbox container (see
+      # app/executor.py) -- needs the host daemon's socket, since it has no
+      # daemon of its own (unlike sandbox, which is deliberately
+      # --privileged with a real nested one for isolation).
+      - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "8000:8000"
     depends_on:
@@ -47,13 +59,12 @@ services:
     privileged: true
     volumes:
       - ambit_sandbox_docker:/var/lib/docker
-      # Phase 7: bind (not named volume) so the host path matches what
-      # core writes to directly during local dev (core runs as a bare
-      # uvicorn process, not containerized, in this workflow) -- both see
-      # the exact same directory tree, no sync step needed. Nested DinD
+      # Bind (not named volume): must be the identical host path core's
+      # own /plans mount above resolves to -- see that comment. Nested DinD
       # resolves `docker run -v` source paths against this container's own
       # filesystem, which is why this must be a real bind mount and not a
-      # named volume the inner daemon can't see into.
+      # named volume the inner daemon can't see into (see runner.py for
+      # why --workspace uses docker cp rather than a live mount at all).
       - ./services/core/.data/plans:/plans
 
 volumes:

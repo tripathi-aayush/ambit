@@ -166,3 +166,13 @@ class RepositoryDocResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class AnalyticsSummary(BaseModel):
+    total_actions: int
+    by_status: dict[str, int]
+    by_risk_level: dict[str, int]
+    approvals_approved: int
+    approvals_denied: int
+    total_plans: int
+    rollback_plans: int

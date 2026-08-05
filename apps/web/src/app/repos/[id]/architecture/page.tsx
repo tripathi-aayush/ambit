@@ -6,6 +6,7 @@ import ReactFlow, { Background, Controls, type Edge, type Node } from "reactflow
 import "reactflow/dist/style.css";
 import ReactMarkdown, { type Components } from "react-markdown";
 import mermaid from "mermaid";
+import { RepoNav } from "@/components/RepoNav";
 
 const markdownComponents: Components = {
   h1: ({ children }) => <h1 className="mb-2 mt-4 text-lg font-semibold text-neutral-900 first:mt-0">{children}</h1>,
@@ -69,7 +70,7 @@ function DependencyGraph({ files, edges }: { files: RepoFile[]; edges: Dependenc
     <div style={{ height: 420 }} className="rounded-md border border-neutral-200">
       <ReactFlow nodes={nodes} edges={rfEdges} fitView>
         <Background />
-        <Controls />
+        <Controls position="top-right" />
       </ReactFlow>
     </div>
   );
@@ -137,15 +138,7 @@ export default function ArchitecturePage({ params }: { params: Promise<{ id: str
           ← All repositories
         </Link>
         <h1 className="text-lg font-semibold">{repo?.name ?? "…"}</h1>
-        <nav className="mt-2 flex gap-4 text-sm">
-          <Link href={`/repos/${id}`} className="text-neutral-500 hover:underline">
-            Chat
-          </Link>
-          <span className="font-medium text-neutral-900">Architecture</span>
-          <Link href={`/repos/${id}/tasks`} className="text-neutral-500 hover:underline">
-            Tasks
-          </Link>
-        </nav>
+        <RepoNav repoId={id} active="architecture" />
       </header>
 
       {loading && <p className="text-sm text-neutral-400">Generating architecture doc — this can take a moment on first view…</p>}

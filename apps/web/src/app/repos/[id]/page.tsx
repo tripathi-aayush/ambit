@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { use, useEffect, useRef, useState } from "react";
+import { RepoNav } from "@/components/RepoNav";
 import { chat, getRepo, type ChatMessage, type ChatSource, type Repository } from "@/lib/api";
 
 interface DisplayMessage extends ChatMessage {
@@ -74,15 +75,7 @@ export default function RepoChatPage({ params }: { params: Promise<{ id: string 
             ← All repositories
           </Link>
           <h1 className="text-lg font-semibold">{repo?.name ?? "…"}</h1>
-          <nav className="mt-2 flex gap-4 text-sm">
-            <span className="font-medium text-neutral-900">Chat</span>
-            <Link href={`/repos/${id}/architecture`} className="text-neutral-500 hover:underline">
-              Architecture
-            </Link>
-            <Link href={`/repos/${id}/tasks`} className="text-neutral-500 hover:underline">
-              Tasks
-            </Link>
-          </nav>
+          <RepoNav repoId={id} active="chat" />
         </div>
       </header>
 

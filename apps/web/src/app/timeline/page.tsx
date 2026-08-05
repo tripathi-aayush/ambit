@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { diffLines } from "diff";
+import { RiskLabel, StatusPill } from "@/components/badges";
 import {
   getActionEvents,
   getPlan,
@@ -12,21 +13,6 @@ import {
   type ActionEvent,
   type ActionStatus,
 } from "@/lib/api";
-
-const STATUS_COLORS: Record<ActionStatus, string> = {
-  pending: "bg-amber-100 text-amber-800",
-  approved: "bg-blue-100 text-blue-800",
-  executing: "bg-amber-100 text-amber-800",
-  completed: "bg-green-100 text-green-800",
-  failed: "bg-red-100 text-red-800",
-  denied: "bg-red-100 text-red-800",
-};
-
-const RISK_COLORS: Record<string, string> = {
-  low: "text-green-700",
-  medium: "text-amber-700",
-  high: "text-red-700",
-};
 
 const REVERTABLE_TYPES = new Set(["file_write", "file_delete"]);
 
@@ -122,14 +108,8 @@ function ActionRow({ action, onChanged }: { action: Action; onChanged: () => voi
           <span className="truncate text-neutral-600">{action.target || "(auto)"}</span>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {action.risk_level && (
-            <span className={`text-xs ${RISK_COLORS[action.risk_level] ?? ""}`}>
-              {action.risk_level} ({action.risk_score})
-            </span>
-          )}
-          <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[action.status]}`}>
-            {action.status}
-          </span>
+          <RiskLabel level={action.risk_level} score={action.risk_score} className="text-xs" />
+          <StatusPill status={action.status} />
         </div>
       </button>
 
@@ -215,7 +195,12 @@ export default function TimelinePage() {
         <Link href="/" className="text-xs text-neutral-500 hover:underline">
           ← All repositories
         </Link>
-        <h1 className="text-lg font-semibold">Timeline</h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-lg font-semibold">Timeline</h1>
+          <Link href="/analytics" className="text-sm text-neutral-500 hover:underline">
+            Analytics →
+          </Link>
+        </div>
         <p className="mt-1 text-sm text-neutral-500">
           Every action across every adapter — risk flags, approvals, and execution outcomes.
         </p>

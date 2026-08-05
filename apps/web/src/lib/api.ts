@@ -182,3 +182,17 @@ export function getActionEvents(actionId: string): Promise<ActionEvent[]> {
 export function rollbackAction(actionId: string): Promise<Plan> {
   return request(`/actions/${actionId}/rollback`, { method: "POST" });
 }
+
+export interface AnalyticsSummary {
+  total_actions: number;
+  by_status: Record<string, number>;
+  by_risk_level: Record<string, number>;
+  approvals_approved: number;
+  approvals_denied: number;
+  total_plans: number;
+  rollback_plans: number;
+}
+
+export function getAnalyticsSummary(): Promise<AnalyticsSummary> {
+  return request("/analytics/summary");
+}
