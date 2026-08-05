@@ -47,6 +47,14 @@ services:
     privileged: true
     volumes:
       - ambit_sandbox_docker:/var/lib/docker
+      # Phase 7: bind (not named volume) so the host path matches what
+      # core writes to directly during local dev (core runs as a bare
+      # uvicorn process, not containerized, in this workflow) -- both see
+      # the exact same directory tree, no sync step needed. Nested DinD
+      # resolves `docker run -v` source paths against this container's own
+      # filesystem, which is why this must be a real bind mount and not a
+      # named volume the inner daemon can't see into.
+      - ./services/core/.data/plans:/plans
 
 volumes:
   ambit_pgdata:

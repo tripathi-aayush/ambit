@@ -28,8 +28,8 @@ from app.pipeline import submit_action
 from app.rag import retrieve
 
 MAX_CANDIDATE_FILES = 5
-MAX_FILE_CONTENT_CHARS = 6000
-MAX_SUMMARIES_IN_PROMPT = 30
+MAX_FILE_CONTENT_CHARS = 2000
+MAX_SUMMARIES_IN_PROMPT = 20
 
 PLAN_SCHEMA = {
     "type": "object",
@@ -60,13 +60,30 @@ PLAN_SCHEMA = {
                         "type": ["string", "null"],
                         "description": "git_commit only: the commit message. Null otherwise.",
                     },
+                    "purpose": {
+                        "type": ["string", "null"],
+                        "description": (
+                            "shell_exec only: set to 'test_run' if this step installs dependencies and runs "
+                            "the test suite. Null for every other shell_exec use and for all other action types."
+                        ),
+                    },
+                    "image": {
+                        "type": ["string", "null"],
+                        "description": (
+                            "shell_exec with purpose='test_run' only: the Docker image to run the tests in — "
+                            "'python:3.12-slim' for Python, 'node:20-slim' for JavaScript/TypeScript. Null otherwise."
+                        ),
+                    },
                     "depends_on": {
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "ids of steps in this same list that must complete first.",
                     },
                 },
-                "required": ["id", "description", "action_type", "target", "content", "commit_message", "depends_on"],
+                "required": [
+                    "id", "description", "action_type", "target", "content",
+                    "commit_message", "purpose", "image", "depends_on",
+                ],
                 "additionalProperties": False,
             },
         },
@@ -135,12 +152,45 @@ def _build_prompt(task_description: str, context: str) -> str:
         "- Prefer editing 1-3 existing files over creating many new ones.\n"
         "- For file_write steps, output the file's COMPLETE new content (not a diff/patch) — "
         "start from the current content shown below and make the minimal change needed.\n"
-        "- Only use shell_exec if the task genuinely requires running a command (e.g. installing "
-        "a dependency) — most tasks need only file_write/file_delete steps.\n"
-        "- The plan MUST end with exactly one git_commit step that depends on every "
-        "file_write/file_delete step, followed by exactly one git_push step that depends on "
-        "the git_commit step. Leave target empty ('') for both — it's filled in automatically.\n"
-        "- Do not invent file paths that don't relate to the task or the codebase shown below.\n\n"
+        "- Only use shell_exec for a general command if the task genuinely requires running one "
+        "(e.g. installing a dependency) — most tasks need only file_write/file_delete steps.\n\n"
+        "Test generation (Python and JavaScript/TypeScript only):\n"
+        "- If this task changes code behavior (not just docs/comments/config), add file_write "
+        "step(s) for a test file covering the change — match the repo's existing test framework "
+        "and conventions if visible in the context below, otherwise default to pytest for Python "
+        "or vitest for JavaScript/TypeScript.\n"
+        "- Then add exactly one shell_exec step with purpose='test_run' whose target is a single "
+        "shell command that installs dependencies and runs the FULL test suite (not just the new "
+        "test file). This command runs from the repository root, same as every file path above — "
+        "if requirements.txt / package.json / the test files live under a subdirectory (as shown "
+        "by the paths above), you have two options, pick based on the situation:\n"
+        "  (a) 'cd subdir && pip install -r requirements.txt pytest && pytest' — required for "
+        "Python if the code under test imports its own package by name (e.g. 'from mypackage.x "
+        "import y'), since that import only resolves when the process's working directory is the "
+        "package's own root; referencing paths without cd will install and discover tests fine but "
+        "then fail with ModuleNotFoundError.\n"
+        "  (b) 'pip install -r subdir/requirements.txt pytest && pytest subdir' or 'npm --prefix "
+        "subdir install && npm --prefix subdir test' — fine for JS/TS (npm --prefix handles this "
+        "correctly), or Python code with no such internal package import.\n"
+        "If everything is at the repo root, the plain form is fine: 'pip install -r "
+        "requirements.txt pytest && pytest' or 'npm install && npm test'. "
+        "The test framework itself (pytest / vitest) is often NOT already listed in the repo's own "
+        "dependency file — check the content shown below before assuming it's installed by "
+        "'pip install -r requirements.txt' or 'npm install' alone; if it's not listed, install it "
+        "explicitly too, as in the examples above. "
+        "Set its image to 'python:3.12-slim' or 'node:20-slim' as appropriate. This step depends on "
+        "every file_write/file_delete step (including the test file).\n"
+        "- Skip test generation entirely for docs-only/config-only changes, or if the repository "
+        "context shows no working test setup — do not fabricate a test command against a "
+        "nonexistent framework or invent test infrastructure that isn't there.\n\n"
+        "The plan MUST end with exactly one git_commit step, followed by exactly one git_push "
+        "step that depends on it. Leave target empty ('') for both — it's filled in automatically. "
+        "git_commit depends on every file_write/file_delete step AND the test_run step if one "
+        "exists (so a test failure blocks the commit and PR).\n"
+        "- Use the EXACT repo-relative file path as shown in the summaries/candidate-files list below — "
+        "copy it verbatim, don't shorten or guess it (many repos nest the actual package under a "
+        "subdirectory, e.g. 'some-service/src/module/file.py', not just 'module/file.py'). Do not "
+        "invent or abbreviate paths.\n\n"
         f"Task: {task_description}\n\n"
         f"Repository context:\n{context}"
     )
@@ -153,7 +203,26 @@ async def generate_plan(
     prompt = _build_prompt(task_description, context)
 
     client = get_llm_client()
-    data = await client.structured_completion(prompt, PLAN_SCHEMA, max_tokens=4000)
+    # A plan can include full-file content for several files (implementation
+    # + test file) plus a test-run step and the rest of the DAG, all as one
+    # JSON blob -- Phase 7's test generation regularly pushes this past
+    # what Phase 5's original 4000 budget needed, and a response truncated
+    # mid-string produces invalid JSON, not a partial result, so
+    # under-budgeting here fails the whole plan. Balanced against
+    # MAX_CANDIDATE_FILES/MAX_FILE_CONTENT_CHARS above to stay under the
+    # 12000 TPM cap on Groq's on-demand tier (input + output combined).
+    #
+    # One retry: Groq's structured output here is prompt-based JSON mode,
+    # not constrained decoding, so the model occasionally mixes Python
+    # triple-quote syntax into a JSON string value (especially when a
+    # file_write's content is itself Python source with docstrings) and
+    # produces invalid JSON -- observed often enough in testing (roughly
+    # every other attempt on a content-heavy plan) to be worth one retry
+    # rather than failing the whole plan on a single bad generation.
+    try:
+        data = await client.structured_completion(prompt, PLAN_SCHEMA, max_tokens=6000)
+    except Exception:
+        data = await client.structured_completion(prompt, PLAN_SCHEMA, max_tokens=6000)
     steps = data["steps"]
 
     plan = Plan(
@@ -180,6 +249,11 @@ async def generate_plan(
             metadata["content"] = step["content"] or ""
         if action_type == ActionType.git_commit:
             metadata["commit_message"] = step["commit_message"] or f"Ambit: {task_description}"
+        if action_type == ActionType.shell_exec:
+            if step.get("purpose"):
+                metadata["purpose"] = step["purpose"]
+            if step.get("image"):
+                metadata["image"] = step["image"]
 
         action_obj = ActionObject(
             action_type=action_type,
