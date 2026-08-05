@@ -12,7 +12,7 @@ from app.models.action import ActionObject
 HIGH_RISK_REQUIRES_APPROVAL = "high"
 
 
-async def _record_event(session: AsyncSession, action_id, event_type: str, payload: dict) -> None:
+async def record_event(session: AsyncSession, action_id, event_type: str, payload: dict) -> None:
     session.add(Event(action_id=action_id, event_type=event_type, payload=payload))
 
 
@@ -31,12 +31,12 @@ async def submit_action(session: AsyncSession, action_in: ActionObject) -> Actio
     session.add(action)
     await session.flush()  # assigns action.id
 
-    await _record_event(session, action.id, "action_created", action_in.model_dump(mode="json"))
+    await record_event(session, action.id, "action_created", action_in.model_dump(mode="json"))
 
     risk_result = risk.score_action(action_in)
     action.risk_score = risk_result.score
     action.risk_level = risk_result.level
-    await _record_event(
+    await record_event(
         session,
         action.id,
         "risk_scored",
@@ -44,7 +44,7 @@ async def submit_action(session: AsyncSession, action_in: ActionObject) -> Actio
     )
 
     policy_result = await policy.evaluate(action_in)
-    await _record_event(
+    await record_event(
         session,
         action.id,
         "policy_evaluated",
@@ -60,7 +60,7 @@ async def submit_action(session: AsyncSession, action_in: ActionObject) -> Actio
 
     if not policy_result.allow:
         action.status = "denied"
-        await _record_event(
+        await record_event(
             session,
             action.id,
             "decided",
@@ -70,10 +70,10 @@ async def submit_action(session: AsyncSession, action_in: ActionObject) -> Actio
         reasons = policy_result.approval_reasons + (
             [f"risk level: {risk_result.level}"] if risk_result.level == HIGH_RISK_REQUIRES_APPROVAL else []
         )
-        await _record_event(session, action.id, "approval_requested", {"reasons": reasons})
+        await record_event(session, action.id, "approval_requested", {"reasons": reasons})
     else:
         action.status = "approved"
-        await _record_event(session, action.id, "decided", {"decision": "approved", "by": "system"})
+        await record_event(session, action.id, "decided", {"decision": "approved", "by": "system"})
 
     await session.commit()
     await session.refresh(action)
@@ -87,7 +87,7 @@ async def decide_approval(
 
     session.add(Approval(action_id=action.id, approver=approver, decision=decision, reason=reason))
     action.status = decision
-    await _record_event(
+    await record_event(
         session,
         action.id,
         "approval_decided",

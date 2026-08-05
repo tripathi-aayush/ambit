@@ -142,6 +142,9 @@ export default function ArchitecturePage({ params }: { params: Promise<{ id: str
             Chat
           </Link>
           <span className="font-medium text-neutral-900">Architecture</span>
+          <Link href={`/repos/${id}/tasks`} className="text-neutral-500 hover:underline">
+            Tasks
+          </Link>
         </nav>
       </header>
 

@@ -52,6 +52,40 @@ export interface RepoFile {
   size_bytes: number;
 }
 
+export type ActionStatus = "pending" | "approved" | "denied" | "executing" | "completed" | "failed";
+
+export interface Action {
+  id: string;
+  action_type: "file_write" | "file_delete" | "git_commit" | "git_push" | "shell_exec" | "db_migration";
+  target: string;
+  actor_adapter: string;
+  actor_agent_name: string;
+  actor_user: string | null;
+  environment: string;
+  branch: string | null;
+  action_metadata: Record<string, unknown>;
+  status: ActionStatus;
+  risk_score: number | null;
+  risk_level: string | null;
+  plan_id: string | null;
+  depends_on: string[];
+  created_at: string;
+}
+
+export type PlanStatus = "planning" | "pending_approval" | "executing" | "completed" | "failed";
+
+export interface Plan {
+  id: string;
+  repository_id: string;
+  task_description: string;
+  branch_name: string;
+  status: PlanStatus;
+  pr_url: string | null;
+  error: string | null;
+  created_at: string;
+  actions: Action[];
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
@@ -96,4 +130,35 @@ export function getGraph(repoId: string): Promise<DependencyEdge[]> {
 
 export function listFiles(repoId: string): Promise<RepoFile[]> {
   return request(`/repos/${repoId}/files`);
+}
+
+export function createPlan(
+  repoId: string,
+  taskDescription: string,
+  environment: "dev" | "staging" | "prod" = "dev"
+): Promise<Plan> {
+  return request(`/repos/${repoId}/plans`, {
+    method: "POST",
+    body: JSON.stringify({ task_description: taskDescription, environment }),
+  });
+}
+
+export function listPlans(repoId: string): Promise<Plan[]> {
+  return request(`/repos/${repoId}/plans`);
+}
+
+export function getPlan(planId: string): Promise<Plan> {
+  return request(`/plans/${planId}`);
+}
+
+export function decideApproval(
+  actionId: string,
+  decision: "approved" | "denied",
+  approver: string,
+  reason?: string
+): Promise<Action> {
+  return request(`/approvals/${actionId}`, {
+    method: "POST",
+    body: JSON.stringify({ approver, decision, reason }),
+  });
 }

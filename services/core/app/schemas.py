@@ -18,7 +18,28 @@ class ActionResponse(BaseModel):
     status: str
     risk_score: Optional[int]
     risk_level: Optional[str]
+    plan_id: Optional[uuid.UUID]
+    depends_on: list[str]
     created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class PlanCreateRequest(BaseModel):
+    task_description: str
+    environment: Literal["dev", "staging", "prod"] = "dev"
+
+
+class PlanResponse(BaseModel):
+    id: uuid.UUID
+    repository_id: uuid.UUID
+    task_description: str
+    branch_name: str
+    status: str
+    pr_url: Optional[str]
+    error: Optional[str]
+    created_at: datetime
+    actions: list[ActionResponse] = []
 
     model_config = {"from_attributes": True}
 

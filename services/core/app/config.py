@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     github_client_id: str = ""
     github_client_secret: str = ""
     github_oauth_redirect_url: str = "http://localhost:8000/auth/github/callback"
+    github_token: str = ""  # PAT (repo scope) used by the web UI adapter to push branches + open PRs
+
+    sandbox_container_name: str = "ambit-sandbox-1"
+    plans_dir: str = "./.data/plans"
 
 
 settings = Settings()

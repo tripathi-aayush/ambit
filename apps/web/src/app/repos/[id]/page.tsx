@@ -79,6 +79,9 @@ export default function RepoChatPage({ params }: { params: Promise<{ id: string 
             <Link href={`/repos/${id}/architecture`} className="text-neutral-500 hover:underline">
               Architecture
             </Link>
+            <Link href={`/repos/${id}/tasks`} className="text-neutral-500 hover:underline">
+              Tasks
+            </Link>
           </nav>
         </div>
       </header>

@@ -19,6 +19,32 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+class Plan(Base):
+    """Web UI adapter (Phase 5): a task description decomposed by the LLM
+    into a DAG of Action Objects (see planner.py). Each step is a real Action
+    row (plan_id set), so it goes through the same risk/policy/approval
+    pipeline every other adapter's actions do — Plan only adds ordering
+    (Action.depends_on) and the execution/PR bookkeeping specific to this
+    adapter's "execute in sandbox -> PR" flow."""
+
+    __tablename__ = "plans"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    repository_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("repositories.id"), nullable=False)
+
+    task_description: Mapped[str] = mapped_column(String, nullable=False)
+    branch_name: Mapped[str] = mapped_column(String, nullable=False)
+
+    # planning -> pending_approval | executing -> completed | failed
+    status: Mapped[str] = mapped_column(String, nullable=False, default="planning")
+    pr_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    error: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    actions: Mapped[list["Action"]] = relationship(back_populates="plan", cascade="all, delete-orphan")
+
+
 class Action(Base):
     __tablename__ = "actions"
 
@@ -39,10 +65,17 @@ class Action(Base):
     risk_score: Mapped[int | None] = mapped_column(nullable=True)
     risk_level: Mapped[str | None] = mapped_column(String, nullable=True)
 
+    # Web UI adapter (Phase 5): steps in a generated plan. NULL for actions
+    # submitted directly via POST /actions by other adapters, which have no
+    # DAG concept — pipeline.py stays adapter-agnostic.
+    plan_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("plans.id"), nullable=True)
+    depends_on: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)  # sibling Action ids
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     events: Mapped[list["Event"]] = relationship(back_populates="action", cascade="all, delete-orphan")
     approvals: Mapped[list["Approval"]] = relationship(back_populates="action", cascade="all, delete-orphan")
+    plan: Mapped["Plan"] = relationship(back_populates="actions")
 
 
 class Approval(Base):
