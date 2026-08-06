@@ -38,15 +38,37 @@ Postgres (with pgvector) is the only datastore — structural data (files, symbo
 ## Running it
 
 ```bash
-cp services/core/.env.example services/core/.env   # fill in at least LLM_PROVIDER + one API key
-cp apps/web/.env.local.example apps/web/.env.local
-docker compose up -d                                # postgres, opa, sandbox, core
-cd apps/web && npm install && npm run dev            # localhost:3000
+cp services/core/.env.example services/core/.env    # fill in AMBIT_API_KEY, LLM_PROVIDER + one API key -- see Authentication below
+cp apps/web/.env.local.example apps/web/.env.local   # fill in NEXT_PUBLIC_AMBIT_API_KEY -- must match AMBIT_API_KEY exactly
+docker compose up -d                                 # postgres, opa, sandbox, core
+cd apps/web && npm install && npm run dev             # localhost:3000
 ```
+
+Open `localhost:3000` once both are running. The page's first action is `GET /repos`, which should return an empty list on a fresh install. If you instead see a failed request in the UI, see Authentication below.
 
 `GITHUB_TOKEN` (a PAT with `repo` scope) is required for the Web UI adapter to push branches and open PRs — without it, plans execute up through `git_commit` and then fail cleanly at `git_push` with a clear error, rather than silently no-op'ing.
 
 Core also runs directly via `uvicorn app.main:app --reload` from `services/core` for faster local iteration — `docker compose up` is the way to verify the full containerized stack, including the sandbox's Docker-outside-of-Docker access into `core`'s container.
+
+## Authentication
+
+Every request to `services/core` must carry an `X-Ambit-Key` header matching `AMBIT_API_KEY`. This is a shared-secret gate added during hardening work ahead of v1.0 — earlier builds had no auth at all, so anything that could reach the core service's port could submit or approve actions. It's one shared secret for a single trusted operator, not per-user accounts or multi-tenant auth.
+
+Two files need the **same** value:
+
+- `services/core/.env` — `AMBIT_API_KEY=<value>`. Generate one with `openssl rand -hex 32` (or any comparably random string).
+- `apps/web/.env.local` — `NEXT_PUBLIC_AMBIT_API_KEY=<the same value>`. The frontend sends this as `X-Ambit-Key` on every request to core.
+
+What each misconfiguration looks like, so it's recognizable if you hit it:
+
+| Situation | What happens |
+|---|---|
+| `AMBIT_API_KEY` unset/empty in `services/core/.env` | Every request gets `500 AMBIT_API_KEY is not configured on the server`, including requests from the frontend. Set it and recreate the container — compose does not pick up `.env` edits on a running container: `docker compose up -d --force-recreate core`. |
+| `NEXT_PUBLIC_AMBIT_API_KEY` unset in `apps/web/.env.local` | The UI loads, but every API call fails with `401 missing X-Ambit-Key header`. Restart `npm run dev` after setting it — Next.js reads `NEXT_PUBLIC_*` vars at build/start time. |
+| The two values are set but don't match | Every API call fails with `403 invalid X-Ambit-Key`. Copy the value from `services/core/.env` into `apps/web/.env.local` exactly — no quotes, no trailing whitespace. |
+| Both set and matching | Requests succeed normally. First successful call on a fresh install is `GET /repos` → `[]`. |
+
+`NEXT_PUBLIC_*` variables are compiled into the browser's JS bundle and are visible to anyone with devtools open on that page. That's an accepted tradeoff for "one operator running their own private instance," not a real secret boundary — don't reuse this key anywhere it needs to resist a hostile browser user.
 
 ## Key design decisions worth knowing about
 
