@@ -1,15 +1,19 @@
-import pc from "picocolors";
+import { randomUUID } from "node:crypto";
 import { createPlan } from "../client";
 import { resolveOrLinkRepo } from "../repoContext";
-import { watchPlan } from "./watch";
+import { startWatching } from "./watch";
 
 export async function implementCommand(task: string, opts: { watch: boolean }): Promise<void> {
   const repo = await resolveOrLinkRepo();
-  console.log(pc.dim("Planning and running ready steps…"));
-  // This call itself already executes every ready (non-approval-blocked)
-  // action before returning -- there's no live progress to show during
-  // this first burst without SSE (deliberately deferred, see the approved
-  // plan). What we CAN show is what happened once it lands.
-  const plan = await createPlan(repo.id, task, { dryRun: false, adapter: "cli_wrapper" });
-  await watchPlan(plan, opts.watch);
+  // Client-generated id: lets us open the live stream for this plan
+  // BEFORE the plan even exists server-side, so nothing that happens
+  // during generation/execution is missed (see startWatching/stream.ts).
+  const planId = randomUUID();
+  await startWatching(
+    planId,
+    async () => {
+      await createPlan(repo.id, task, { id: planId, dryRun: false, adapter: "cli_wrapper" });
+    },
+    opts
+  );
 }

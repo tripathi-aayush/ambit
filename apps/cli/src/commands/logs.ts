@@ -1,49 +1,63 @@
-// v1 is deliberately not a live character-stream -- ActionEvent rows are
-// coarse-grained today (execution_started, then one terminal completed/
-// failed event; see the approved plan's note on incremental shell_exec
-// streaming being separate, scoped follow-up work). `-f` polls for new
-// *events* and prints them promptly, which is honest about what's
-// actually available rather than faking a finer-grained stream.
+// Non-follow mode: one-shot REST fetch of whatever already happened --
+// simplest correct tool for "show me what's there and exit."
+// Follow mode (Orion Phase 2): a genuine live tail via the same SSE
+// stream `implement`/`run` use, not polling -- replaces the old 2s-poll
+// loop entirely.
 
 import pc from "picocolors";
 import { getActionEvents, getPlan, listPlans, type ActionEvent } from "../client";
+import { streamPlan } from "../stream";
 import { actionLabel, describeEvent, timeAgo } from "../format";
 import { resolveOrLinkRepo } from "../repoContext";
+import type { ActionEventMessage } from "@orion/shared";
 
-const POLL_INTERVAL_MS = 2000;
-
-function printEvent(actionLabelText: string, event: ActionEvent, seen: Set<string>): void {
-  if (seen.has(event.id)) return;
-  seen.add(event.id);
+function printEvent(actionLabelText: string, event: ActionEvent): void {
   const desc = describeEvent(event);
   const when = timeAgo(event.created_at) ?? "";
   console.log(`${pc.dim(`[${when}]`)} ${pc.bold(actionLabelText)} ${event.event_type}${desc ? ` — ${desc}` : ""}`);
 }
 
-export async function logsCommand(planIdArg: string | undefined, opts: { follow: boolean }): Promise<void> {
-  let planId = planIdArg;
-  if (!planId) {
-    const repo = await resolveOrLinkRepo();
-    const plans = await listPlans(repo.id);
-    if (plans.length === 0) {
-      console.error(pc.red("No plans for this repository yet."));
-      process.exitCode = 1;
+async function resolvePlanId(planIdArg: string | undefined): Promise<string | null> {
+  if (planIdArg) return planIdArg;
+  const repo = await resolveOrLinkRepo();
+  const plans = await listPlans(repo.id);
+  if (plans.length === 0) {
+    console.error(pc.red("No plans for this repository yet."));
+    process.exitCode = 1;
+    return null;
+  }
+  return plans[0].id; // newest first, per GET /repos/{id}/plans
+}
+
+async function tailOnce(planId: string): Promise<void> {
+  const plan = await getPlan(planId);
+  for (const action of plan.actions) {
+    const events = await getActionEvents(action.id);
+    for (const event of events) printEvent(actionLabel(action), event);
+  }
+}
+
+async function tailLive(planId: string): Promise<void> {
+  for await (const message of streamPlan(planId)) {
+    if (message.type === "action_event") {
+      const { action, event } = message as ActionEventMessage;
+      printEvent(actionLabel(action), event);
+    } else if (message.type === "stream_end") {
+      return;
+    } else if (message.type === "error") {
+      console.error(pc.red(message.detail));
       return;
     }
-    planId = plans[0].id;
   }
+}
 
-  const seen = new Set<string>();
-  const isTerminal = (status: string) => status === "completed" || status === "failed" || status === "denied";
+export async function logsCommand(planIdArg: string | undefined, opts: { follow: boolean }): Promise<void> {
+  const planId = await resolvePlanId(planIdArg);
+  if (!planId) return;
 
-  while (true) {
-    const plan = await getPlan(planId);
-    for (const action of plan.actions) {
-      const events = await getActionEvents(action.id);
-      for (const event of events) printEvent(actionLabel(action), event, seen);
-    }
-    const allDone = plan.actions.every((a) => isTerminal(a.status) || a.status === "pending");
-    if (!opts.follow || allDone) break;
-    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+  if (opts.follow) {
+    await tailLive(planId);
+  } else {
+    await tailOnce(planId);
   }
 }

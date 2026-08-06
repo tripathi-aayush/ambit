@@ -1,7 +1,7 @@
 import pc from "picocolors";
 import { listPlans, runPlan } from "../client";
 import { resolveOrLinkRepo } from "../repoContext";
-import { watchPlan } from "./watch";
+import { startWatching } from "./watch";
 
 export async function runCommand(planIdArg: string | undefined, opts: { watch: boolean }): Promise<void> {
   let planId = planIdArg;
@@ -15,7 +15,11 @@ export async function runCommand(planIdArg: string | undefined, opts: { watch: b
     }
     planId = plans[0].id; // newest first, per GET /repos/{id}/plans
   }
-  console.log(pc.dim(`Running ${planId}…`));
-  const plan = await runPlan(planId);
-  await watchPlan(plan, opts.watch);
+  await startWatching(
+    planId,
+    async () => {
+      await runPlan(planId!);
+    },
+    opts
+  );
 }

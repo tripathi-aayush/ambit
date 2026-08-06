@@ -94,11 +94,12 @@ export function createRepo(cloneUrl: string): Promise<Repository> {
 export function createPlan(
   repoId: string,
   taskDescription: string,
-  options: { dryRun?: boolean; adapter?: Adapter; environment?: "dev" | "staging" | "prod" } = {}
+  options: { id?: string; dryRun?: boolean; adapter?: Adapter; environment?: "dev" | "staging" | "prod" } = {}
 ): Promise<Plan> {
   return request(`/repos/${repoId}/plans`, {
     method: "POST",
     body: JSON.stringify({
+      id: options.id,
       task_description: taskDescription,
       environment: options.environment ?? "dev",
       dry_run: options.dryRun ?? false,
