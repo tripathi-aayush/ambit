@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@orion/shared": "*",
     "@types/dagre": "^0.7.54",
     "@types/diff": "^7.0.2",
     "dagre": "^0.8.5",
