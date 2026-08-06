@@ -12,7 +12,7 @@ from app.config import settings
 from app.db.models import Action, Plan, Repository
 from app.db.session import get_session
 from app.executor import get_plan_lock, run_ready_actions
-from app.models.action import Environment
+from app.models.action import Adapter, Environment
 from app.planner import generate_plan
 from app.schemas import PlanCreateRequest, PlanResponse
 
@@ -41,11 +41,38 @@ async def create_plan(
         raise HTTPException(status_code=404, detail="repository not found")
 
     try:
-        plan = await generate_plan(session, repo, body.task_description, Environment(body.environment))
+        plan = await generate_plan(
+            session,
+            repo,
+            body.task_description,
+            Environment(body.environment),
+            adapter=Adapter(body.adapter),
+        )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"plan generation failed: {exc}") from exc
 
-    await run_ready_actions(session, plan)
+    # Orion CLI (adapter #2): dry_run generates the DAG (each step already
+    # risk/policy-scored) without running any of it -- `orion plan` shows
+    # what would happen; `POST /plans/{id}/run` below executes it later.
+    # Default (False) preserves the web UI's existing always-execute
+    # behavior exactly.
+    if not body.dry_run:
+        await run_ready_actions(session, plan)
+    return await _get_plan_or_404(plan.id, session)
+
+
+@router.post("/plans/{plan_id}/run", response_model=PlanResponse)
+async def run_plan(plan_id: uuid.UUID, session: AsyncSession = Depends(get_session)):
+    """Explicitly executes every currently-ready action in an already-
+    generated plan -- the second half of a dry_run `orion plan` /
+    `orion run` pair, and also how `orion implement` resumes a plan whose
+    approval was decided elsewhere. Mirrors create_plan's own post-generate
+    call to run_ready_actions exactly."""
+    plan = await _get_plan_or_404(plan_id, session)
+    try:
+        await run_ready_actions(session, plan)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"execution failed: {exc}") from exc
     return await _get_plan_or_404(plan.id, session)
 
 

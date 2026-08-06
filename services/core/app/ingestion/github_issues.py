@@ -1,6 +1,6 @@
 """Fetches PR/issue text via GitHub's public REST API, unauthenticated.
 Works for public repos only, capped at GitHub's unauthenticated rate limit
-(60 requests/hour/IP) — no OAuth token is persisted anywhere in Ambit yet
+(60 requests/hour/IP) — no OAuth token is persisted anywhere in Orion yet
 (see Phase 0/1 notes), so this is the ceiling until that's built.
 
 GitHub's /issues endpoint returns both issues and PRs (a PR is a superset

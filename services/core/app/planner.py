@@ -197,7 +197,11 @@ def _build_prompt(task_description: str, context: str) -> str:
 
 
 async def generate_plan(
-    session: AsyncSession, repo: Repository, task_description: str, environment: Environment = Environment.dev
+    session: AsyncSession,
+    repo: Repository,
+    task_description: str,
+    environment: Environment = Environment.dev,
+    adapter: Adapter = Adapter.web_ui,
 ) -> Plan:
     context = await _gather_planning_context(session, repo, task_description)
     prompt = _build_prompt(task_description, context)
@@ -228,7 +232,7 @@ async def generate_plan(
     plan = Plan(
         repository_id=repo.id,
         task_description=task_description,
-        branch_name=f"ambit/{_slugify(task_description)}-{uuid.uuid4().hex[:8]}",
+        branch_name=f"orion/{_slugify(task_description)}-{uuid.uuid4().hex[:8]}",
         status="planning",
     )
     session.add(plan)
@@ -248,7 +252,7 @@ async def generate_plan(
         if action_type == ActionType.file_write:
             metadata["content"] = step["content"] or ""
         if action_type == ActionType.git_commit:
-            metadata["commit_message"] = step["commit_message"] or f"Ambit: {task_description}"
+            metadata["commit_message"] = step["commit_message"] or f"Orion: {task_description}"
         if action_type == ActionType.shell_exec:
             if step.get("purpose"):
                 metadata["purpose"] = step["purpose"]
@@ -258,7 +262,10 @@ async def generate_plan(
         action_obj = ActionObject(
             action_type=action_type,
             target=target,
-            actor=ActionActor(adapter=Adapter.web_ui, agent_name="ambit-planner"),
+            actor=ActionActor(
+                adapter=adapter,
+                agent_name="orion-cli" if adapter == Adapter.cli_wrapper else "orion-planner",
+            ),
             environment=environment,
             branch=plan.branch_name,
             metadata=metadata,

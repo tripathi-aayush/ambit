@@ -38,7 +38,7 @@ from tenacity import before_sleep_log, retry, retry_if_exception_type, stop_afte
 
 from app.config import settings
 
-logger = logging.getLogger("ambit.embeddings")
+logger = logging.getLogger("orion.embeddings")
 
 MODEL = "voyage-3"
 MAX_BATCH_ITEMS = 128

@@ -1,4 +1,4 @@
-package ambit
+package orion
 
 # Rego v1 syntax (default as of OPA 1.0). Input is the Action Object as
 # submitted to POST /actions (see packages/shared/action-object.schema.json).

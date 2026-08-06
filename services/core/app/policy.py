@@ -1,5 +1,5 @@
-"""Thin client wrapping the OPA sidecar. Ambit does not implement its own
-policy engine — Rego rules live in infra/opa/policies/ambit.rego."""
+"""Thin client wrapping the OPA sidecar. Orion does not implement its own
+policy engine — Rego rules live in infra/opa/policies/orion.rego."""
 
 from dataclasses import dataclass, field
 
@@ -8,7 +8,7 @@ import httpx
 from app.config import settings
 from app.models.action import ActionObject
 
-OPA_QUERY_PATH = "/v1/data/ambit"
+OPA_QUERY_PATH = "/v1/data/orion"
 
 
 @dataclass

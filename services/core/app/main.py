@@ -13,13 +13,13 @@ from app.api.plans import router as plans_router
 from app.api.repos import router as repos_router
 from app.auth import require_api_key
 
-logger = logging.getLogger("ambit")
+logger = logging.getLogger("orion")
 
-# Global dependency: every route on this app requires a valid X-Ambit-Key
+# Global dependency: every route on this app requires a valid X-Orion-Key
 # header (see app/auth.py, audit finding C1). Applied at the app level
 # rather than per-router so a new router added later is covered by
 # construction, not by remembering to wire it in.
-app = FastAPI(title="Ambit Runtime Core", dependencies=[Depends(require_api_key)])
+app = FastAPI(title="Orion Runtime Core", dependencies=[Depends(require_api_key)])
 
 app.add_middleware(
     CORSMiddleware,

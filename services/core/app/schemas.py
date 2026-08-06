@@ -35,6 +35,16 @@ class ActionResponse(BaseModel):
 class PlanCreateRequest(BaseModel):
     task_description: str
     environment: Literal["dev", "staging", "prod"] = "dev"
+    # Orion CLI (adapter #2): generate the DAG without executing any of it
+    # -- lets `orion plan` show what would happen before anything runs,
+    # composed later with POST /plans/{id}/run. Defaults to today's exact
+    # web UI behavior (always execute ready steps inline).
+    dry_run: bool = False
+    # Which adapter is submitting this plan, purely for correct audit-trail
+    # attribution (see generate_plan in planner.py) -- was previously
+    # hardcoded to "web_ui" for every plan regardless of origin, which
+    # became wrong the moment a second adapter existed.
+    adapter: Literal["web_ui", "cli_wrapper"] = "web_ui"
 
 
 class PlanResponse(BaseModel):

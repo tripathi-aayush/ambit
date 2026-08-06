@@ -84,8 +84,8 @@ def _ensure_working_dir(plan: Plan, repo: Repository) -> Path:
     if not wd.exists():
         clone_repo(repo.clone_url, wd)
         subprocess.run(["git", "checkout", "-b", plan.branch_name], cwd=str(wd), check=True, capture_output=True, text=True)
-        subprocess.run(["git", "config", "user.email", "ambit@localhost"], cwd=str(wd), check=True)
-        subprocess.run(["git", "config", "user.name", "Ambit"], cwd=str(wd), check=True)
+        subprocess.run(["git", "config", "user.email", "orion@localhost"], cwd=str(wd), check=True)
+        subprocess.run(["git", "config", "user.name", "Orion"], cwd=str(wd), check=True)
     return wd
 
 
@@ -201,7 +201,7 @@ async def _run_action(session: AsyncSession, action: Action, wd: Path, plan: Pla
         return result
 
     if action.action_type == "git_commit":
-        message = action.action_metadata.get("commit_message", "Ambit automated change")
+        message = action.action_metadata.get("commit_message", "Orion automated change")
         result = await asyncio.to_thread(_do_git_commit, wd, message)
         if "commit_sha" in result:
             action.action_metadata = {**action.action_metadata, "commit_sha": result["commit_sha"]}
@@ -234,7 +234,7 @@ async def _run_action(session: AsyncSession, action: Action, wd: Path, plan: Pla
             repo.clone_url,
             head_branch=plan.branch_name,
             base_branch=base_branch,
-            title=f"Ambit: {plan.task_description}"[:255],
+            title=f"Orion: {plan.task_description}"[:255],
             body=await build_pr_body(session, plan),
         )
         plan.pr_url = pr["html_url"]

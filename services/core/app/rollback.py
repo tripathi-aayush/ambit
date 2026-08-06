@@ -64,7 +64,7 @@ async def create_rollback_plan(session: AsyncSession, action: Action) -> Plan:
     plan = Plan(
         repository_id=repo.id,
         task_description=task_description,
-        branch_name=f"ambit/revert-{_slugify(action.target)}-{uuid.uuid4().hex[:8]}",
+        branch_name=f"orion/revert-{_slugify(action.target)}-{uuid.uuid4().hex[:8]}",
         status="planning",
         reverts_action_id=action.id,
     )
@@ -77,7 +77,7 @@ async def create_rollback_plan(session: AsyncSession, action: Action) -> Plan:
         obj = ActionObject(
             action_type=action_type,
             target=target,
-            actor=ActionActor(adapter=Adapter.web_ui, agent_name="ambit-rollback"),
+            actor=ActionActor(adapter=Adapter.web_ui, agent_name="orion-rollback"),
             environment=environment,
             branch=plan.branch_name,
             metadata=metadata,
