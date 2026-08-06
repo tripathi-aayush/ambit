@@ -1,4 +1,4 @@
-# Ambit
+# Orion
 
 A runtime/policy engine for AI coding agents — not a demo wrapper around an LLM, but a governance layer every agent action passes through: **risk score → policy check → approval (if required) → sandboxed execution → audit trail**, with rollback and reporting built on the same event log.
 
@@ -38,8 +38,8 @@ Postgres (with pgvector) is the only datastore — structural data (files, symbo
 ## Running it
 
 ```bash
-cp services/core/.env.example services/core/.env    # fill in AMBIT_API_KEY, LLM_PROVIDER + one API key -- see Authentication below
-cp apps/web/.env.local.example apps/web/.env.local   # fill in NEXT_PUBLIC_AMBIT_API_KEY -- must match AMBIT_API_KEY exactly
+cp services/core/.env.example services/core/.env    # fill in ORION_API_KEY, LLM_PROVIDER + one API key -- see Authentication below
+cp apps/web/.env.local.example apps/web/.env.local   # fill in NEXT_PUBLIC_ORION_API_KEY -- must match ORION_API_KEY exactly
 docker compose up -d                                 # postgres, opa, sandbox, core
 cd apps/web && npm install && npm run dev             # localhost:3000
 ```
@@ -52,20 +52,20 @@ Core also runs directly via `uvicorn app.main:app --reload` from `services/core`
 
 ## Authentication
 
-Every request to `services/core` must carry an `X-Ambit-Key` header matching `AMBIT_API_KEY`. This is a shared-secret gate added during hardening work ahead of v1.0 — earlier builds had no auth at all, so anything that could reach the core service's port could submit or approve actions. It's one shared secret for a single trusted operator, not per-user accounts or multi-tenant auth.
+Every request to `services/core` must carry an `X-Orion-Key` header matching `ORION_API_KEY`. This is a shared-secret gate added during hardening work ahead of v1.0 — earlier builds had no auth at all, so anything that could reach the core service's port could submit or approve actions. It's one shared secret for a single trusted operator, not per-user accounts or multi-tenant auth.
 
 Two files need the **same** value:
 
-- `services/core/.env` — `AMBIT_API_KEY=<value>`. Generate one with `openssl rand -hex 32` (or any comparably random string).
-- `apps/web/.env.local` — `NEXT_PUBLIC_AMBIT_API_KEY=<the same value>`. The frontend sends this as `X-Ambit-Key` on every request to core.
+- `services/core/.env` — `ORION_API_KEY=<value>`. Generate one with `openssl rand -hex 32` (or any comparably random string).
+- `apps/web/.env.local` — `NEXT_PUBLIC_ORION_API_KEY=<the same value>`. The frontend sends this as `X-Orion-Key` on every request to core.
 
 What each misconfiguration looks like, so it's recognizable if you hit it:
 
 | Situation | What happens |
 |---|---|
-| `AMBIT_API_KEY` unset/empty in `services/core/.env` | Every request gets `500 AMBIT_API_KEY is not configured on the server`, including requests from the frontend. Set it and recreate the container — compose does not pick up `.env` edits on a running container: `docker compose up -d --force-recreate core`. |
-| `NEXT_PUBLIC_AMBIT_API_KEY` unset in `apps/web/.env.local` | The UI loads, but every API call fails with `401 missing X-Ambit-Key header`. Restart `npm run dev` after setting it — Next.js reads `NEXT_PUBLIC_*` vars at build/start time. |
-| The two values are set but don't match | Every API call fails with `403 invalid X-Ambit-Key`. Copy the value from `services/core/.env` into `apps/web/.env.local` exactly — no quotes, no trailing whitespace. |
+| `ORION_API_KEY` unset/empty in `services/core/.env` | Every request gets `500 ORION_API_KEY is not configured on the server`, including requests from the frontend. Set it and recreate the container — compose does not pick up `.env` edits on a running container: `docker compose up -d --force-recreate core`. |
+| `NEXT_PUBLIC_ORION_API_KEY` unset in `apps/web/.env.local` | The UI loads, but every API call fails with `401 missing X-Orion-Key header`. Restart `npm run dev` after setting it — Next.js reads `NEXT_PUBLIC_*` vars at build/start time. |
+| The two values are set but don't match | Every API call fails with `403 invalid X-Orion-Key`. Copy the value from `services/core/.env` into `apps/web/.env.local` exactly — no quotes, no trailing whitespace. |
 | Both set and matching | Requests succeed normally. First successful call on a fresh install is `GET /repos` → `[]`. |
 
 `NEXT_PUBLIC_*` variables are compiled into the browser's JS bundle and are visible to anyone with devtools open on that page. That's an accepted tradeoff for "one operator running their own private instance," not a real secret boundary — don't reuse this key anywhere it needs to resist a hostile browser user.
@@ -73,7 +73,7 @@ What each misconfiguration looks like, so it's recognizable if you hit it:
 ## Key design decisions worth knowing about
 
 - **Risk scoring is deterministic, not learned** (`app/risk.py`): a fixed set of additive rules over action type, target path, branch, and environment. No ML — every score comes with human-readable reasons, and the same input always produces the same score.
-- **Policy is OPA/Rego** (`infra/opa/policies/ambit.rego`), not hand-rolled — direct commits to `main`, prod database migrations, and prod shell execution all require approval by policy, independent of the risk score.
+- **Policy is OPA/Rego** (`infra/opa/policies/orion.rego`), not hand-rolled — direct commits to `main`, prod database migrations, and prod shell execution all require approval by policy, independent of the risk score.
 - **Rollback re-uses the forward pipeline.** Reverting an action builds a new mini-plan (restore old content → commit → push → fresh PR) and submits it through the exact same risk/policy pipeline as any other change — restoring a deleted prod file is exactly the kind of thing that should still be reviewable, not bypassed because it's technically an "undo."
 - **A test failure blocks PR creation for free.** The executor halts an entire plan on any step's failure (built for Phase 6's audit trail); Phase 7 just inserts a test-run step into the dependency chain ahead of `git_commit`, so "block PR creation on failure" falls out of existing behavior rather than needing new logic.
 - **PR descriptions are generated deterministically**, not by another LLM call — they're a factual summary (steps, risk scores, approval trail, test outcome) built from data already on the Action/Approval rows.

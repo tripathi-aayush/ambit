@@ -4,7 +4,7 @@ import { use, useEffect, useMemo, useState } from "react";
 import { type Edge, type Node } from "reactflow";
 import ReactMarkdown from "react-markdown";
 import mermaid from "mermaid";
-import { Sparkles } from "lucide-react";
+import { Package, Sparkles } from "lucide-react";
 import { RepoNav } from "@/components/RepoNav";
 import { markdownComponents } from "@/components/markdownComponents";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -12,6 +12,7 @@ import { ErrorMessage } from "@/components/ui/ErrorMessage";
 import { SkeletonText } from "@/components/ui/Skeleton";
 import { ActionGraph } from "@/components/graph/ActionGraph";
 import { layoutWithDagre } from "@/components/graph/layout";
+import { externalDependencies } from "@/lib/repoStats";
 import {
   getArchitecture,
   getGraph,
@@ -125,6 +126,8 @@ export default function ArchitecturePage({ params }: { params: Promise<{ id: str
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const externalDeps = useMemo(() => externalDependencies(edges), [edges]);
+
   useEffect(() => {
     setLoading(true);
     setError(null);
@@ -141,7 +144,7 @@ export default function ArchitecturePage({ params }: { params: Promise<{ id: str
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-6 py-8">
-      <PageHeader backHref="/" title={repo?.name ?? "…"} tabs={<RepoNav repoId={id} active="architecture" />} />
+      <PageHeader backHref="/repos" title={repo?.name ?? "…"} tabs={<RepoNav repoId={id} active="architecture" />} />
 
       {loading && (
         <div className="space-y-6">
@@ -172,6 +175,26 @@ export default function ArchitecturePage({ params }: { params: Promise<{ id: str
               <MermaidDiagram code={doc.sequence_diagram_mermaid} />
             </section>
           </div>
+
+          {externalDeps.length > 0 && (
+            <section>
+              <h2 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-neutral-700 dark:text-neutral-300">
+                <Package className="h-3.5 w-3.5" strokeWidth={2} />
+                External dependencies
+                <span className="font-normal text-neutral-400 dark:text-neutral-500">({externalDeps.length})</span>
+              </h2>
+              <div className="flex flex-wrap gap-1.5">
+                {externalDeps.map((dep) => (
+                  <span
+                    key={dep}
+                    className="rounded-md border border-neutral-200 bg-neutral-50 px-2 py-1 font-mono text-xs text-neutral-700 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-300"
+                  >
+                    {dep}
+                  </span>
+                ))}
+              </div>
+            </section>
+          )}
 
           <section>
             <h2 className="mb-2 text-sm font-semibold text-neutral-700 dark:text-neutral-300">README</h2>

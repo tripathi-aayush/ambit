@@ -22,6 +22,16 @@ const KIND_META: Record<string, { label: string; icon: typeof FileCode2 }> = {
   issue: { label: "Issue", icon: CircleAlert },
 };
 
+function suggestedQuestions(repo: Repository | null): string[] {
+  const framework = repo?.frameworks[0];
+  return [
+    "What does this repository do?",
+    framework ? `How is ${framework} used in this codebase?` : "What are the main components?",
+    "What's the riskiest part of this codebase to change?",
+    "What tests exist for this repo?",
+  ];
+}
+
 function ThinkingIndicator() {
   return (
     <div className="flex items-center gap-1 py-1">
@@ -54,9 +64,7 @@ export default function RepoChatPage({ params }: { params: Promise<{ id: string 
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, sending]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const question = input.trim();
+  const sendMessage = async (question: string) => {
     if (!question || sending) return;
 
     const nextMessages: DisplayMessage[] = [...messages, { role: "user", content: question }];
@@ -86,15 +94,33 @@ export default function RepoChatPage({ params }: { params: Promise<{ id: string 
     }
   };
 
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    sendMessage(input.trim());
+  };
+
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-6 py-8">
-      <PageHeader backHref="/" title={repo?.name ?? "…"} tabs={<RepoNav repoId={id} active="chat" />} />
+      <PageHeader backHref="/repos" title={repo?.name ?? "…"} tabs={<RepoNav repoId={id} active="chat" />} />
 
       <div className="flex-1 space-y-6 overflow-y-auto pb-4">
         {messages.length === 0 && (
-          <p className="text-sm text-neutral-500 dark:text-neutral-400">
-            Ask something about this repository — its code, commit history, or issues/PRs.
-          </p>
+          <div>
+            <p className="text-sm text-neutral-500 dark:text-neutral-400">
+              Ask something about this repository — its code, commit history, or issues/PRs.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {suggestedQuestions(repo).map((q) => (
+                <button
+                  key={q}
+                  onClick={() => sendMessage(q)}
+                  className="rounded-full border border-neutral-200 px-3 py-1.5 text-xs text-neutral-600 transition-colors hover:border-accent hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:border-neutral-800 dark:text-neutral-400"
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
+          </div>
         )}
         {messages.map((m, i) => (
           <div key={i} className="flex gap-3">
@@ -102,7 +128,7 @@ export default function RepoChatPage({ params }: { params: Promise<{ id: string 
               <MessageCircle className="h-3.5 w-3.5" strokeWidth={2} />
             </div>
             <div className="min-w-0 flex-1">
-              <p className="mb-1 text-xs font-medium text-neutral-400 dark:text-neutral-500">{m.role === "user" ? "You" : "Ambit"}</p>
+              <p className="mb-1 text-xs font-medium text-neutral-400 dark:text-neutral-500">{m.role === "user" ? "You" : "Orion"}</p>
               {m.role === "user" ? (
                 <p className="max-w-[65ch] whitespace-pre-wrap text-sm leading-relaxed text-neutral-900 dark:text-neutral-100">
                   {m.content}

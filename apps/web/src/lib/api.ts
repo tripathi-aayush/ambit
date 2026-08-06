@@ -3,7 +3,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 // (see services/core/app/auth.py). Bundled into the client JS via
 // NEXT_PUBLIC_* -- see the note in .env.local.example about what that
 // does and doesn't protect against.
-const API_KEY = process.env.NEXT_PUBLIC_AMBIT_API_KEY || "";
+const API_KEY = process.env.NEXT_PUBLIC_ORION_API_KEY || "";
 
 export interface Repository {
   id: string;
@@ -50,11 +50,37 @@ export interface DependencyEdge {
   edge_type: string;
 }
 
+export interface Symbol {
+  id: string;
+  symbol_type: string;
+  name: string;
+  detail: string | null;
+  start_line: number;
+  end_line: number;
+}
+
+export interface FileSummary {
+  summary_text: string;
+  confidence: number;
+  model: string;
+  source: string;
+}
+
+export interface FileOwnership {
+  author_name: string;
+  author_email: string;
+  commit_count: number;
+  last_commit_at: string | null;
+}
+
 export interface RepoFile {
   id: string;
   path: string;
   language: string | null;
   size_bytes: number;
+  symbols: Symbol[];
+  summary: FileSummary | null;
+  ownership: FileOwnership[];
 }
 
 export type ActionStatus = "pending" | "approved" | "denied" | "executing" | "completed" | "failed";
@@ -102,7 +128,7 @@ export interface ActionEvent {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", "X-Ambit-Key": API_KEY, ...init?.headers },
+    headers: { "Content-Type": "application/json", "X-Orion-Key": API_KEY, ...init?.headers },
   });
   if (!res.ok) {
     const detail = await res.text();
@@ -178,6 +204,10 @@ export function decideApproval(
 
 export function listAllActions(status?: ActionStatus): Promise<Action[]> {
   return request(`/actions${status ? `?status=${status}` : ""}`);
+}
+
+export function getAction(actionId: string): Promise<Action> {
+  return request(`/actions/${actionId}`);
 }
 
 export function getActionEvents(actionId: string): Promise<ActionEvent[]> {

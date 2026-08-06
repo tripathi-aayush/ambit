@@ -1,62 +1,95 @@
 @import "tailwindcss";
 
+/* Adapted from a reference dev-tool site (measured via computed styles,
+   not guessed): near-black base, amber accent, translucent borders,
+   soft rounded corners. Dark is the default/reference-matched theme;
+   light ("paper") is our own design since the reference has no light
+   mode, kept as the accommodation behind an explicit media override. */
 :root {
-  --background: #ffffff;
-  --foreground: #0a0a0a;
+  --background: #17161f;
+  --foreground: #f4f1ea;
+  --foreground-dim: #6c6a66;
 
-  /* Single accent — primary actions, links, active nav state only.
-     Never used for status/risk, so the semantic palette below stays legible. */
-  --accent: #4f46e5;
-  --accent-hover: #4338ca;
-  --accent-foreground: #ffffff;
+  --accent: #f2a93b;
+  --accent-hover: #ffc266;
+  --accent-foreground: #17161f;
 
-  /* Canonical risk palette — the one place saturated color is allowed to
-     mean something beyond "primary action". Consumed by components/theme.ts,
-     not redefined per-page. */
-  --risk-low: #15803d;
-  --risk-low-bg: #f0fdf4;
-  --risk-medium: #b45309;
-  --risk-medium-bg: #fffbeb;
-  --risk-high: #b91c1c;
-  --risk-high-bg: #fef2f2;
+  /* Card border/fill -- border is the text color at low opacity (theme
+     -portable by construction), matching the reference's technique.
+     Surface is a translucent white lift rather than a hardcoded near-
+     black, so cards stay correctly *lighter* than --background (elevated)
+     regardless of what shade --background is -- important now that it's
+     a lighter purple-black (#17161f) than the old #070707, not near-black. */
+  --border: rgba(244, 241, 234, 0.16);
+  --surface: rgba(255, 255, 255, 0.045);
+
+  /* Risk-low/success has no equivalent in the reference palette (their
+     site never shows a "good" state) -- introduced to match their
+     restrained saturation rather than a neon green. */
+  --risk-low: #3fae7d;
+  --risk-low-bg: rgba(63, 174, 125, 0.1);
+  --risk-medium: #f2a93b;
+  --risk-medium-bg: rgba(242, 169, 59, 0.08);
+  --risk-high: #f0443e;
+  --risk-high-bg: rgba(240, 68, 62, 0.1);
+}
+
+/* "Paper" light mode -- no reference exists for this state; designed to
+   keep the same relationships (translucent border/fill, amber accent
+   darkened for AA contrast on a light surface) rather than inverting
+   the dark palette directly. */
+@media (prefers-color-scheme: light) {
+  :root {
+    --background: #f7f5f0;
+    --foreground: #1c1b19;
+    --foreground-dim: #7a766e;
+
+    --accent: #b5730a;
+    --accent-hover: #8f5c08;
+    --accent-foreground: #f7f5f0;
+
+    --border: rgba(28, 27, 25, 0.12);
+    --surface: rgba(0, 0, 0, 0.02);
+
+    --risk-low: #227a55;
+    --risk-low-bg: rgba(34, 122, 85, 0.08);
+    --risk-medium: #b5730a;
+    --risk-medium-bg: rgba(181, 115, 10, 0.08);
+    --risk-high: #b91c1c;
+    --risk-high-bg: rgba(185, 28, 28, 0.08);
+  }
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-foreground-dim: var(--foreground-dim);
   --color-accent: var(--accent);
   --color-accent-hover: var(--accent-hover);
   --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-surface: var(--surface);
   --color-risk-low: var(--risk-low);
   --color-risk-low-bg: var(--risk-low-bg);
   --color-risk-medium: var(--risk-medium);
   --color-risk-medium-bg: var(--risk-medium-bg);
   --color-risk-high: var(--risk-high);
   --color-risk-high-bg: var(--risk-high-bg);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-
-    --accent: #818cf8;
-    --accent-hover: #a5b4fc;
-    --accent-foreground: #0a0a0a;
-
-    --risk-low: #4ade80;
-    --risk-low-bg: rgba(20, 83, 45, 0.25);
-    --risk-medium: #fbbf24;
-    --risk-medium-bg: rgba(120, 53, 15, 0.25);
-    --risk-high: #f87171;
-    --risk-high-bg: rgba(127, 29, 29, 0.25);
-  }
+  /* JetBrains Mono throughout -- Bold body text, ExtraBold headings (see
+     body{} below and the font-extrabold utility at each font-display
+     call site), no separate sans/display faces anymore. */
+  --font-sans: var(--font-jetbrains-mono);
+  --font-mono: var(--font-jetbrains-mono);
+  --font-display: var(--font-jetbrains-mono);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-sans), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-family: var(--font-sans), ui-monospace, monospace;
+  /* Bold (700) is the baseline weight everywhere -- headings go further
+     to ExtraBold (800) via font-extrabold at each font-display site.
+     Elements that need a lighter touch (e.g. Skeleton) set their own
+     weight explicitly, same as any other Tailwind override. */
+  font-weight: 700;
 }

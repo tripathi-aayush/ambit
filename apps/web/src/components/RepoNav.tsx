@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { MessageSquare, Network, ListTree } from "lucide-react";
+import { LayoutDashboard, MessageSquare, Network, ListTree } from "lucide-react";
 
 const TABS = [
+  { key: "overview", label: "Overview", icon: LayoutDashboard, href: (id: string) => `/repos/${id}/overview` },
   { key: "chat", label: "Chat", icon: MessageSquare, href: (id: string) => `/repos/${id}` },
   { key: "architecture", label: "Architecture", icon: Network, href: (id: string) => `/repos/${id}/architecture` },
   { key: "tasks", label: "Tasks", icon: ListTree, href: (id: string) => `/repos/${id}/tasks` },

@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { diffLines } from "diff";
 import { ChevronRight, History, RotateCcw } from "lucide-react";
 import { RiskLabel, StatusPill } from "@/components/badges";
 import { actionTypeMeta } from "@/components/actionTypeIcons";
+import { DiffView } from "@/components/DiffView";
+import { describeEvent } from "@/lib/eventDetail";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -24,43 +25,6 @@ import {
 const REVERTABLE_TYPES = new Set(["file_write", "file_delete"]);
 const RISK_LEVELS = ["low", "medium", "high"] as const;
 
-function DiffView({ action }: { action: Action }) {
-  const previous = action.action_metadata.previous_content;
-  const current = action.action_type === "file_write" ? action.action_metadata.content : "";
-  if (typeof previous !== "string" && typeof current !== "string") {
-    return <p className="text-xs text-neutral-500 dark:text-neutral-400">No diffable content captured for this action.</p>;
-  }
-
-  const parts = diffLines((previous as string) ?? "", (current as string) ?? "");
-
-  return (
-    <pre className="max-h-80 overflow-auto rounded-md border border-neutral-200 bg-neutral-50 p-3 text-xs leading-relaxed dark:border-neutral-800 dark:bg-neutral-900/40">
-      {parts.map((part, i) => (
-        <span
-          key={i}
-          className={
-            part.added
-              ? "block bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"
-              : part.removed
-                ? "block bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400"
-                : "block text-neutral-500 dark:text-neutral-400"
-          }
-        >
-          {part.value
-            .split("\n")
-            .filter((_, idx, arr) => idx < arr.length - 1)
-            .map((line, li) => (
-              <span key={li} className="block">
-                {part.added ? "+ " : part.removed ? "- " : "  "}
-                {line}
-              </span>
-            ))}
-        </span>
-      ))}
-    </pre>
-  );
-}
-
 function ActionRow({ action, onChanged }: { action: Action; onChanged: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const [events, setEvents] = useState<ActionEvent[] | null>(null);
@@ -68,7 +32,7 @@ function ActionRow({ action, onChanged }: { action: Action; onChanged: () => voi
   const [rollbackMessage, setRollbackMessage] = useState<string | null>(null);
   const [repoId, setRepoId] = useState<string | null>(null);
 
-  const { icon: Icon } = actionTypeMeta(action.action_type);
+  const { icon: Icon, label } = actionTypeMeta(action.action_type);
 
   const toggle = async () => {
     const next = !expanded;
@@ -122,7 +86,7 @@ function ActionRow({ action, onChanged }: { action: Action; onChanged: () => voi
           />
           <span className="shrink-0 font-mono text-xs text-neutral-400 dark:text-neutral-500">{new Date(action.created_at).toLocaleString()}</span>
           <Icon className="h-3.5 w-3.5 shrink-0 text-neutral-400 dark:text-neutral-500" strokeWidth={2} />
-          <span className="shrink-0 font-medium text-neutral-900 dark:text-neutral-100">{action.action_type}</span>
+          <span className="shrink-0 font-medium text-neutral-900 dark:text-neutral-100">{label}</span>
           <span className="truncate text-neutral-600 dark:text-neutral-400">{action.target || "(auto)"}</span>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -157,18 +121,34 @@ function ActionRow({ action, onChanged }: { action: Action; onChanged: () => voi
             {events && events.length === 0 && <p className="text-neutral-400 dark:text-neutral-500">No events.</p>}
             {events && (
               <ul className="space-y-1">
-                {events.map((e) => (
-                  <li key={e.id} className="text-neutral-600 dark:text-neutral-400">
-                    <span className="font-mono text-neutral-400 dark:text-neutral-500">{new Date(e.created_at).toLocaleTimeString()}</span>{" "}
-                    <span className="font-medium text-neutral-800 dark:text-neutral-200">{e.event_type}</span>
-                    {e.event_type === "risk_scored" && ` — ${(e.payload.reasons as string[])?.join("; ")}`}
-                    {e.event_type === "policy_evaluated" &&
-                      ` — allow: ${e.payload.allow}, requires approval: ${e.payload.require_approval}`}
-                    {e.event_type === "approval_decided" &&
-                      ` — ${e.payload.approver}: ${e.payload.decision}${e.payload.reason ? ` (${e.payload.reason})` : ""}`}
-                    {e.event_type === "execution_failed" && ` — ${e.payload.error}`}
-                  </li>
-                ))}
+                {events.map((e) => {
+                  const output = e.payload.output as Record<string, unknown> | undefined;
+                  const prUrl = e.event_type === "execution_completed" && typeof output?.pr_url === "string" ? output.pr_url : null;
+                  const detail = describeEvent(e);
+                  return (
+                    <li key={e.id} className="text-neutral-600 dark:text-neutral-400">
+                      <span className="font-mono text-neutral-400 dark:text-neutral-500">
+                        {new Date(e.created_at).toLocaleTimeString()}
+                      </span>{" "}
+                      <span className="font-medium text-neutral-800 dark:text-neutral-200">{e.event_type.replace(/_/g, " ")}</span>
+                      {prUrl ? (
+                        <>
+                          {" — PR opened: "}
+                          <a
+                            href={prUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="rounded text-accent underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                          >
+                            {prUrl}
+                          </a>
+                        </>
+                      ) : (
+                        detail && ` — ${detail}`
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </div>
@@ -216,8 +196,8 @@ export default function TimelinePage() {
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col px-6 py-8">
       <PageHeader
-        title="Timeline"
-        description="Every action across every adapter — risk flags, approvals, and execution outcomes."
+        title="Audit Log"
+        description="The permanent record — every action, every decision, every reason, across every repository."
       />
 
       <div className="mb-3 flex items-center gap-4 text-sm">

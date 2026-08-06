@@ -7,6 +7,8 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Card } from "@/components/ui/Card";
 import { ErrorMessage } from "@/components/ui/ErrorMessage";
 import { SkeletonText } from "@/components/ui/Skeleton";
+import { StatCard } from "@/components/ui/StatCard";
+import { BarChart } from "@/components/ui/BarChart";
 
 const RISK_BAR_COLORS: Record<string, string> = {
   low: "bg-risk-low",
@@ -24,73 +26,6 @@ const STATUS_BAR_COLORS: Record<string, string> = {
   failed: "bg-red-500",
   denied: "bg-red-400",
 };
-
-function StatCard({
-  label,
-  value,
-  detail,
-  icon: Icon,
-}: {
-  label: string;
-  value: string;
-  detail?: string;
-  icon: typeof ListChecks;
-}) {
-  return (
-    <Card>
-      <div className="flex items-center gap-1.5 text-xs text-neutral-500 dark:text-neutral-400">
-        <Icon className="h-3.5 w-3.5" strokeWidth={2} />
-        {label}
-      </div>
-      <p className="mt-2 text-2xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-100">{value}</p>
-      {detail && <p className="mt-1 text-xs text-neutral-400 dark:text-neutral-500">{detail}</p>}
-    </Card>
-  );
-}
-
-function BarChart({
-  title,
-  data,
-  order,
-  colors,
-}: {
-  title: string;
-  data: Record<string, number>;
-  order?: string[];
-  colors: Record<string, string>;
-}) {
-  const keys = order ? order.filter((k) => k in data) : Object.keys(data);
-  const max = Math.max(1, ...Object.values(data));
-
-  if (keys.length === 0) {
-    return (
-      <div>
-        <h2 className="mb-2 text-sm font-semibold text-neutral-700 dark:text-neutral-300">{title}</h2>
-        <p className="text-sm text-neutral-500 dark:text-neutral-400">No data yet.</p>
-      </div>
-    );
-  }
-
-  return (
-    <div>
-      <h2 className="mb-3 text-sm font-semibold text-neutral-700 dark:text-neutral-300">{title}</h2>
-      <div className="space-y-2.5">
-        {keys.map((key) => (
-          <div key={key} className="flex items-center gap-3 text-sm">
-            <span className="w-24 shrink-0 text-neutral-600 dark:text-neutral-400">{key.replace(/_/g, " ")}</span>
-            <div className="h-3 flex-1 overflow-hidden rounded-full bg-neutral-100 dark:bg-neutral-800">
-              <div
-                className={`h-full rounded-full transition-all ${colors[key] ?? "bg-neutral-400"}`}
-                style={{ width: `${(data[key] / max) * 100}%` }}
-              />
-            </div>
-            <span className="w-8 shrink-0 text-right text-neutral-500 dark:text-neutral-400">{data[key]}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 export default function AnalyticsPage() {
   const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
@@ -111,7 +46,7 @@ export default function AnalyticsPage() {
     <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-6 py-8">
       <PageHeader
         title="Analytics"
-        description="Aggregated across every repository and adapter — acceptance rate, rollback frequency, and risk distribution over every action Ambit has governed."
+        description="Aggregated across every repository and adapter — acceptance rate, rollback frequency, and risk distribution over every action Orion has governed."
       />
 
       {error && <ErrorMessage>{error}</ErrorMessage>}

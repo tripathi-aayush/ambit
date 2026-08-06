@@ -2,8 +2,9 @@
 
 import { use, useEffect, useMemo, useState } from "react";
 import { type Edge, type Node } from "reactflow";
-import { AlertTriangle, ExternalLink, ListTree } from "lucide-react";
+import { AlertTriangle, ExternalLink, ListTree, RotateCcw } from "lucide-react";
 import { NODE_STATUS_COLORS, RiskLabel, StatusPill } from "@/components/badges";
+import { DiffView } from "@/components/DiffView";
 import { RepoNav } from "@/components/RepoNav";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
@@ -16,6 +17,7 @@ import { actionTypeMeta } from "@/components/actionTypeIcons";
 import {
   createPlan,
   decideApproval,
+  getAction,
   getPlan,
   getRepo,
   listPlans,
@@ -30,7 +32,7 @@ function ActionDag({ actions }: { actions: Action[] }) {
       const colors = NODE_STATUS_COLORS[a.status];
       return {
         id: a.id,
-        data: { label: `${a.action_type}\n${a.target || "(auto)"}\n${a.status}` },
+        data: { label: `${actionTypeMeta(a.action_type).label}\n${a.target || "(auto)"}\n${a.status}` },
         position: { x: 0, y: 0 },
         style: {
           fontSize: 11,
@@ -81,8 +83,19 @@ export default function TasksPage({ params }: { params: Promise<{ id: string }> 
   const [decidingDecision, setDecidingDecision] = useState<"approved" | "denied" | null>(null);
   const [environment, setEnvironment] = useState<"dev" | "staging" | "prod">("dev");
   const [plansLoading, setPlansLoading] = useState(true);
+  const [revertedAction, setRevertedAction] = useState<Action | null>(null);
 
   const selected = plans.find((p) => p.id === selectedId) ?? null;
+
+  useEffect(() => {
+    if (!selected?.reverts_action_id) {
+      setRevertedAction(null);
+      return;
+    }
+    getAction(selected.reverts_action_id)
+      .then(setRevertedAction)
+      .catch(() => setRevertedAction(null));
+  }, [selected?.reverts_action_id]);
 
   const refreshPlans = () => {
     listPlans(id)
@@ -140,7 +153,7 @@ export default function TasksPage({ params }: { params: Promise<{ id: string }> 
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-6 py-8">
-      <PageHeader backHref="/" title={repo?.name ?? "…"} tabs={<RepoNav repoId={id} active="tasks" />} />
+      <PageHeader backHref="/repos" title={repo?.name ?? "…"} tabs={<RepoNav repoId={id} active="tasks" />} />
 
       <form onSubmit={handleSubmit} className="mb-6 flex gap-2">
         <input
@@ -191,6 +204,7 @@ export default function TasksPage({ params }: { params: Promise<{ id: string }> 
                 <div className="flex items-center gap-1.5">
                   {riskRank > 0 && <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${RISK_DOT_COLOR[riskRank]}`} />}
                   <StatusPill status={p.status} />
+                  {p.reverts_action_id && <RotateCcw className="h-3 w-3 shrink-0 text-neutral-400 dark:text-neutral-500" strokeWidth={2} />}
                 </div>
                 <p className="mt-1 truncate text-neutral-700 dark:text-neutral-300">{p.task_description}</p>
                 <p className="mt-0.5 text-xs text-neutral-400 dark:text-neutral-500">{new Date(p.created_at).toLocaleString()}</p>
@@ -204,6 +218,20 @@ export default function TasksPage({ params }: { params: Promise<{ id: string }> 
 
           {selected && (
             <>
+              {selected.reverts_action_id && (
+                <div className="flex items-center gap-2 rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-600 dark:border-neutral-800 dark:bg-neutral-900/40 dark:text-neutral-400">
+                  <RotateCcw className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
+                  {revertedAction ? (
+                    <span>
+                      Reverts <span className="font-medium text-neutral-800 dark:text-neutral-200">{revertedAction.action_type}</span>{" "}
+                      on <span className="font-mono">{revertedAction.target}</span>
+                    </span>
+                  ) : (
+                    <span>This plan reverts a previous action.</span>
+                  )}
+                </div>
+              )}
+
               <Card className="text-xs">
                 <p>
                   <span className="font-medium">Branch:</span> {selected.branch_name}
@@ -236,55 +264,63 @@ export default function TasksPage({ params }: { params: Promise<{ id: string }> 
                   <h2 className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">Awaiting approval</h2>
                   {pendingActions.map((a) => {
                     const isHighRisk = a.risk_level === "high";
-                    const { icon: Icon } = actionTypeMeta(a.action_type);
+                    const { icon: Icon, label } = actionTypeMeta(a.action_type);
                     return (
                       <div
                         key={a.id}
-                        className={`flex items-start justify-between gap-3 rounded-md border px-3 py-2.5 text-xs ${
+                        className={`rounded-md border px-3 py-2.5 text-xs ${
                           isHighRisk
                             ? "border-risk-high/40 bg-risk-high-bg"
                             : "border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/20"
                         }`}
                       >
-                        <div className="min-w-0">
-                          <p className="flex items-center gap-1.5 font-medium text-neutral-900 dark:text-neutral-100">
-                            <Icon className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
-                            {a.action_type} — {a.target}
-                          </p>
-                          <p className="mt-1 text-neutral-600 dark:text-neutral-400">{String(a.action_metadata.description ?? "")}</p>
-                          {a.risk_level && (
-                            <p className="mt-1">
-                              risk: <RiskLabel level={a.risk_level} score={a.risk_score} />
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="flex items-center gap-1.5 font-medium text-neutral-900 dark:text-neutral-100">
+                              <Icon className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
+                              {label} <span className="font-mono">{a.target}</span>
                             </p>
-                          )}
-                        </div>
-                        <div className="flex shrink-0 flex-col items-end gap-1.5">
-                          {isHighRisk && (
-                            <span className="flex items-center gap-1 text-[11px] font-medium text-risk-high">
-                              <AlertTriangle className="h-3 w-3" strokeWidth={2} /> high risk
-                            </span>
-                          )}
-                          <div className="flex gap-2">
-                            <Button
-                              size="sm"
-                              variant={isHighRisk ? "destructive" : "primary"}
-                              disabled={decidingId === a.id}
-                              loading={decidingId === a.id && decidingDecision === "approved"}
-                              onClick={() => handleDecide(a, "approved")}
-                            >
-                              Approve
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              disabled={decidingId === a.id}
-                              loading={decidingId === a.id && decidingDecision === "denied"}
-                              onClick={() => handleDecide(a, "denied")}
-                            >
-                              Deny
-                            </Button>
+                            <p className="mt-1 text-neutral-600 dark:text-neutral-400">{String(a.action_metadata.description ?? "")}</p>
+                            {a.risk_level && (
+                              <p className="mt-1">
+                                risk: <RiskLabel level={a.risk_level} score={a.risk_score} />
+                              </p>
+                            )}
+                          </div>
+                          <div className="flex shrink-0 flex-col items-end gap-1.5">
+                            {isHighRisk && (
+                              <span className="flex items-center gap-1 text-[11px] font-medium text-risk-high">
+                                <AlertTriangle className="h-3 w-3" strokeWidth={2} /> high risk
+                              </span>
+                            )}
+                            <div className="flex gap-2">
+                              <Button
+                                size="sm"
+                                variant={isHighRisk ? "destructive" : "primary"}
+                                disabled={decidingId === a.id}
+                                loading={decidingId === a.id && decidingDecision === "approved"}
+                                onClick={() => handleDecide(a, "approved")}
+                              >
+                                Approve
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                disabled={decidingId === a.id}
+                                loading={decidingId === a.id && decidingDecision === "denied"}
+                                onClick={() => handleDecide(a, "denied")}
+                              >
+                                Deny
+                              </Button>
+                            </div>
                           </div>
                         </div>
+
+                        {(a.action_type === "file_write" || a.action_type === "file_delete") && (
+                          <div className="mt-2.5 border-t border-black/5 pt-2.5 dark:border-white/5">
+                            <DiffView action={a} />
+                          </div>
+                        )}
                       </div>
                     );
                   })}

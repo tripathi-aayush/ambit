@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://ambit.dev/schemas/action-object.schema.json",
+  "$id": "https://orion.dev/schemas/action-object.schema.json",
   "title": "ActionObject",
-  "description": "The single contract every adapter (web UI, Claude Code, CLI wrapper) speaks when submitting an agent-issued action to the Ambit runtime core.",
+  "description": "The single contract every adapter (web UI, Claude Code, CLI wrapper) speaks when submitting an agent-issued action to the Orion runtime core.",
   "type": "object",
   "required": ["action_type", "target", "actor"],
   "additionalProperties": false,
