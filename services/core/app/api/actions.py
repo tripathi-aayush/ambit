@@ -18,7 +18,7 @@ router = APIRouter(prefix="/actions", tags=["actions"])
 
 @router.post("", response_model=ActionResponse)
 async def create_action(action_in: ActionObject, session: AsyncSession = Depends(get_session)):
-    action = await submit_action(session, action_in)
+    action, _events = await submit_action(session, action_in)
     return action
 
 

@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Action, Plan
 from app.db.session import get_session
+from app.events import event_bus, event_message
 from app.executor import run_ready_actions
 from app.pipeline import decide_approval
 from app.schemas import ActionResponse, ApprovalDecisionRequest
@@ -29,7 +30,7 @@ async def decide(
     if exists is None:
         raise HTTPException(status_code=404, detail="action not found")
 
-    action = await decide_approval(
+    action, event = await decide_approval(
         session, action_id, decision_in.approver, decision_in.decision, decision_in.reason
     )
     if action is None:
@@ -37,6 +38,7 @@ async def decide(
 
     if action.plan_id is not None:
         # Web UI adapter plan step: a fresh approval may unblock dependents.
+        event_bus.publish(action.plan_id, event_message(action, event))
         plan = await session.get(Plan, action.plan_id)
         try:
             await run_ready_actions(session, plan)

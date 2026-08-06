@@ -35,6 +35,13 @@ class ActionResponse(BaseModel):
 class PlanCreateRequest(BaseModel):
     task_description: str
     environment: Literal["dev", "staging", "prod"] = "dev"
+    # Orion Phase 2 (live runtime): an idempotency-key-style client-
+    # supplied id, so a caller can open GET /plans/{id}/stream *before*
+    # this request is even sent and watch planning + execution live
+    # instead of only seeing the result once this call returns. Optional
+    # and server-generated as before if omitted -- existing callers
+    # (the web UI's Tasks page) are unaffected.
+    id: Optional[uuid.UUID] = None
     # Orion CLI (adapter #2): generate the DAG without executing any of it
     # -- lets `orion plan` show what would happen before anything runs,
     # composed later with POST /plans/{id}/run. Defaults to today's exact

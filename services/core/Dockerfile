@@ -22,4 +22,11 @@ COPY app ./app
 COPY migrations ./migrations
 COPY alembic.ini .
 
-CMD alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000
+# --workers 1 is explicit and load-bearing, not just today's default:
+# app/events.py's live-runtime event bus is an in-process dict of
+# subscriber queues, correct only within a single process. Raising this
+# without also moving that module to a real broker (Postgres LISTEN/
+# NOTIFY or similar) would silently break live streaming for any client
+# whose SSE connection lands on a different worker than the one running
+# the plan it's watching.
+CMD alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1

@@ -15,11 +15,13 @@ from app.models.action import ActionObject
 HIGH_RISK_REQUIRES_APPROVAL = "high"
 
 
-async def record_event(session: AsyncSession, action_id, event_type: str, payload: dict) -> None:
-    session.add(Event(action_id=action_id, event_type=event_type, payload=payload))
+async def record_event(session: AsyncSession, action_id, event_type: str, payload: dict) -> Event:
+    event = Event(action_id=action_id, event_type=event_type, payload=payload)
+    session.add(event)
+    return event
 
 
-async def submit_action(session: AsyncSession, action_in: ActionObject) -> Action:
+async def submit_action(session: AsyncSession, action_in: ActionObject) -> tuple[Action, list[Event]]:
     action = Action(
         action_type=action_in.action_type.value,
         target=action_in.target,
@@ -34,58 +36,65 @@ async def submit_action(session: AsyncSession, action_in: ActionObject) -> Actio
     session.add(action)
     await session.flush()  # assigns action.id
 
-    await record_event(session, action.id, "action_created", action_in.model_dump(mode="json"))
+    events: list[Event] = []
+    events.append(await record_event(session, action.id, "action_created", action_in.model_dump(mode="json")))
 
     risk_result = risk.score_action(action_in)
     action.risk_score = risk_result.score
     action.risk_level = risk_result.level
-    await record_event(
-        session,
-        action.id,
-        "risk_scored",
-        {"score": risk_result.score, "level": risk_result.level, "reasons": risk_result.reasons},
+    events.append(
+        await record_event(
+            session,
+            action.id,
+            "risk_scored",
+            {"score": risk_result.score, "level": risk_result.level, "reasons": risk_result.reasons},
+        )
     )
 
     policy_result = await policy.evaluate(action_in)
-    await record_event(
-        session,
-        action.id,
-        "policy_evaluated",
-        {
-            "allow": policy_result.allow,
-            "require_approval": policy_result.require_approval,
-            "deny_reasons": policy_result.deny_reasons,
-            "approval_reasons": policy_result.approval_reasons,
-        },
+    events.append(
+        await record_event(
+            session,
+            action.id,
+            "policy_evaluated",
+            {
+                "allow": policy_result.allow,
+                "require_approval": policy_result.require_approval,
+                "deny_reasons": policy_result.deny_reasons,
+                "approval_reasons": policy_result.approval_reasons,
+            },
+        )
     )
 
     needs_approval = policy_result.require_approval or risk_result.level == HIGH_RISK_REQUIRES_APPROVAL
 
     if not policy_result.allow:
         action.status = "denied"
-        await record_event(
-            session,
-            action.id,
-            "decided",
-            {"decision": "denied", "by": "policy", "reasons": policy_result.deny_reasons},
+        events.append(
+            await record_event(
+                session,
+                action.id,
+                "decided",
+                {"decision": "denied", "by": "policy", "reasons": policy_result.deny_reasons},
+            )
         )
     elif needs_approval:
         reasons = policy_result.approval_reasons + (
             [f"risk level: {risk_result.level}"] if risk_result.level == HIGH_RISK_REQUIRES_APPROVAL else []
         )
-        await record_event(session, action.id, "approval_requested", {"reasons": reasons})
+        events.append(await record_event(session, action.id, "approval_requested", {"reasons": reasons}))
     else:
         action.status = "approved"
-        await record_event(session, action.id, "decided", {"decision": "approved", "by": "system"})
+        events.append(await record_event(session, action.id, "decided", {"decision": "approved", "by": "system"}))
 
     await session.commit()
     await session.refresh(action)
-    return action
+    return action, events
 
 
 async def decide_approval(
     session: AsyncSession, action_id: uuid.UUID, approver: str, decision: str, reason: str | None
-) -> Action | None:
+) -> tuple[Action, Event] | tuple[None, None]:
     """Sprint 1 / audit C3: the status transition is the single atomic
     UPDATE below (WHERE status = 'pending'), not a separate read-then-
     write -- Postgres row-locks the matching row for the duration of a
@@ -105,10 +114,10 @@ async def decide_approval(
     )
     action = result.scalar_one_or_none()
     if action is None:
-        return None
+        return None, None
 
     session.add(Approval(action_id=action.id, approver=approver, decision=decision, reason=reason))
-    await record_event(
+    event = await record_event(
         session,
         action.id,
         "approval_decided",
@@ -116,4 +125,4 @@ async def decide_approval(
     )
     await session.commit()
     await session.refresh(action)
-    return action
+    return action, event

@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db.models import Action, Plan, Repository
+from app.events import event_bus, event_message
 from app.github_client import clone_repo, create_pull_request, get_default_branch, push_branch
 from app.pipeline import record_event
 from app.pr_description import build_pr_body
@@ -96,15 +97,36 @@ def _sandbox_timeout(workspace: str | None) -> int:
     return 300 if workspace else 60
 
 
-def _run_in_sandbox(
-    command: str, *, image: str | None = None, workspace: str | None = None, network: bool = False
+async def _run_in_sandbox(
+    session: AsyncSession,
+    action: Action,
+    plan: Plan,
+    command: str,
+    *,
+    image: str | None = None,
+    workspace: str | None = None,
+    network: bool = False,
 ) -> dict:
     """workspace, if given, is the plan id -- resolved against /plans
     inside the sandbox container, which docker-compose.yml bind-mounts to
     the same host directory core writes plan clones into (see
     docker-compose.yml's sandbox.volumes and app.config.plans_dir).
     runner.py then docker-cp's that content into the actual test
-    container, rather than mounting it — see runner.py's docstring for why."""
+    container, rather than mounting it — see runner.py's docstring for why.
+
+    Orion Phase 2 (live runtime): runner.py streams one NDJSON line per
+    output line from the target command to its own stdout as it runs
+    (see runner.py), instead of one final JSON blob -- this reads that
+    stream incrementally via asyncio.create_subprocess_exec (native async,
+    no thread-crossing needed) and records+publishes a "shell_output"
+    event per line, live, as it arrives. Native asyncio subprocess reads
+    stdout/stderr concurrently via asyncio.gather so a chatty docker-exec
+    stderr can't deadlock the stdout protocol reader (the classic
+    two-pipes-one-thread pitfall) -- runner.py's real content all comes
+    through stdout; this process's own stderr is only ever populated by a
+    genuine docker-exec failure (container gone, etc.), not by the target
+    command's output.
+    """
     runner_args = ["docker", "exec", settings.sandbox_container_name, "python3", "runner.py"]
     if image:
         runner_args += ["--image", image]
@@ -115,10 +137,54 @@ def _run_in_sandbox(
     runner_args.append(command)
 
     exec_timeout = _sandbox_timeout(workspace) + SANDBOX_EXEC_OVERHEAD
-    result = subprocess.run(runner_args, capture_output=True, text=True, timeout=exec_timeout)
-    if result.returncode != 0:
-        raise ExecutionError(f"sandbox exec itself failed: {result.stderr}")
-    return json.loads(result.stdout)
+
+    proc = await asyncio.create_subprocess_exec(
+        *runner_args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+    )
+
+    stdout_lines: list[str] = []
+    stderr_lines: list[str] = []
+    result: dict = {}
+
+    async def _read_protocol() -> None:
+        assert proc.stdout is not None
+        async for raw_line in proc.stdout:
+            try:
+                msg = json.loads(raw_line)
+            except json.JSONDecodeError:
+                continue  # tolerate stray non-protocol output rather than crashing the whole action
+            if msg.get("type") == "output":
+                stream = msg.get("stream", "stdout")
+                line = msg.get("line", "")
+                (stdout_lines if stream == "stdout" else stderr_lines).append(line)
+                event = await record_event(session, action.id, "shell_output", {"stream": stream, "line": line})
+                await session.commit()
+                event_bus.publish(plan.id, event_message(action, event))
+            elif msg.get("type") == "result":
+                result["exit_code"] = msg.get("exit_code")
+
+    async def _drain_docker_stderr() -> str:
+        assert proc.stderr is not None
+        data = await proc.stderr.read()
+        return data.decode(errors="replace")
+
+    try:
+        _, docker_stderr = await asyncio.wait_for(
+            asyncio.gather(_read_protocol(), _drain_docker_stderr()), timeout=exec_timeout
+        )
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        raise ExecutionError(f"sandbox exec timed out after {exec_timeout}s")
+
+    returncode = await proc.wait()
+    if "exit_code" not in result:
+        # runner.py never sent a final result line -- docker exec itself
+        # failed (container missing, image pull failed, etc.), not the
+        # target command.
+        raise ExecutionError(f"sandbox exec itself failed: {docker_stderr or f'docker exec exited {returncode}'}")
+
+    return {"exit_code": result["exit_code"], "stdout": "\n".join(stdout_lines), "stderr": "\n".join(stderr_lines)}
 
 
 def _do_git_commit(wd: Path, message: str) -> dict:
@@ -182,8 +248,10 @@ async def _run_action(session: AsyncSession, action: Action, wd: Path, plan: Pla
 
     if action.action_type == "shell_exec":
         is_test_run = action.action_metadata.get("purpose") == "test_run"
-        result = await asyncio.to_thread(
-            _run_in_sandbox,
+        result = await _run_in_sandbox(
+            session,
+            action,
+            plan,
             action.target,
             image=action.action_metadata.get("image"),
             workspace=str(plan.id) if is_test_run else None,
@@ -245,8 +313,9 @@ async def _run_action(session: AsyncSession, action: Action, wd: Path, plan: Pla
 
 async def execute_action(session: AsyncSession, action: Action, plan: Plan, repo: Repository) -> None:
     action.status = "executing"
-    await record_event(session, action.id, "execution_started", {})
+    event = await record_event(session, action.id, "execution_started", {})
     await session.commit()
+    event_bus.publish(plan.id, event_message(action, event))
 
     wd = await asyncio.to_thread(_ensure_working_dir, plan, repo)
 
@@ -254,13 +323,15 @@ async def execute_action(session: AsyncSession, action: Action, plan: Plan, repo
         output = await _run_action(session, action, wd, plan, repo)
     except Exception as exc:  # noqa: BLE001 - must not crash the plan loop; failure is a normal outcome
         action.status = "failed"
-        await record_event(session, action.id, "execution_failed", {"error": str(exc)})
+        event = await record_event(session, action.id, "execution_failed", {"error": str(exc)})
         await session.commit()
+        event_bus.publish(plan.id, event_message(action, event))
         raise
     else:
         action.status = "completed"
-        await record_event(session, action.id, "execution_completed", {"output": output})
+        event = await record_event(session, action.id, "execution_completed", {"output": output})
         await session.commit()
+        event_bus.publish(plan.id, event_message(action, event))
 
 
 async def run_ready_actions(session: AsyncSession, plan: Plan) -> None:

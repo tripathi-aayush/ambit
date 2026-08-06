@@ -22,6 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Action, File, FileSummary, Plan, Repository
+from app.events import event_bus, event_message
 from app.llm import get_llm_client
 from app.models.action import ActionActor, ActionObject, ActionType, Adapter, Environment
 from app.pipeline import submit_action
@@ -202,7 +203,25 @@ async def generate_plan(
     task_description: str,
     environment: Environment = Environment.dev,
     adapter: Adapter = Adapter.web_ui,
+    plan_id: uuid.UUID | None = None,
 ) -> Plan:
+    # Orion Phase 2 (live runtime): the Plan row is created and committed
+    # FIRST, before the (possibly multi-second, occasionally retried) LLM
+    # planning call below -- previously this row didn't exist until
+    # planning had already finished. A stream subscriber watching this
+    # plan_id needs the row to exist near-instantly, not once planning is
+    # done, or "Planning..." would never actually be observable live.
+    plan = Plan(
+        id=plan_id or uuid.uuid4(),
+        repository_id=repo.id,
+        task_description=task_description,
+        branch_name=f"orion/{_slugify(task_description)}-{uuid.uuid4().hex[:8]}",
+        status="planning",
+    )
+    session.add(plan)
+    await session.commit()
+    await session.refresh(plan)
+
     context = await _gather_planning_context(session, repo, task_description)
     prompt = _build_prompt(task_description, context)
 
@@ -228,15 +247,6 @@ async def generate_plan(
     except Exception:
         data = await client.structured_completion(prompt, PLAN_SCHEMA, max_tokens=6000)
     steps = data["steps"]
-
-    plan = Plan(
-        repository_id=repo.id,
-        task_description=task_description,
-        branch_name=f"orion/{_slugify(task_description)}-{uuid.uuid4().hex[:8]}",
-        status="planning",
-    )
-    session.add(plan)
-    await session.flush()
 
     local_to_action_id: dict[str, uuid.UUID] = {}
     created: list[tuple[Action, list[str]]] = []
@@ -270,9 +280,16 @@ async def generate_plan(
             branch=plan.branch_name,
             metadata=metadata,
         )
-        action = await submit_action(session, action_obj)
+        action, events = await submit_action(session, action_obj)
         local_to_action_id[step["id"]] = action.id
         created.append((action, step["depends_on"]))
+        # plan.id is already known (flushed above) even though action.plan_id
+        # itself isn't set until the loop below -- publishing here, not
+        # after that second loop, is what makes each step's risk/policy
+        # events show up live as the plan is generated, not all at once
+        # once the whole DAG exists.
+        for event in events:
+            event_bus.publish(plan.id, event_message(action, event))
 
     for action, local_deps in created:
         action.plan_id = plan.id

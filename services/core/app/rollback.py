@@ -82,7 +82,12 @@ async def create_rollback_plan(session: AsyncSession, action: Action) -> Plan:
             branch=plan.branch_name,
             metadata=metadata,
         )
-        return await submit_action(session, obj)
+        # Rollback plans aren't live-streamed in this phase (out of scope --
+        # see the Phase 2 plan's publish sites: planner.py, executor.py,
+        # approvals.py only) -- the events list is discarded, not lost;
+        # they're still persisted and readable via GET /actions/{id}/events.
+        action, _events = await submit_action(session, obj)
+        return action
 
     inverse_action = await _submit(inverse_type, action.target, inverse_metadata)
     commit_action = await _submit(
