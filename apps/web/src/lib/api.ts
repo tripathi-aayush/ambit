@@ -1,4 +1,9 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+// Sprint 1 / audit C1: every request must carry this shared-secret header
+// (see services/core/app/auth.py). Bundled into the client JS via
+// NEXT_PUBLIC_* -- see the note in .env.local.example about what that
+// does and doesn't protect against.
+const API_KEY = process.env.NEXT_PUBLIC_AMBIT_API_KEY || "";
 
 export interface Repository {
   id: string;
@@ -97,7 +102,7 @@ export interface ActionEvent {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", ...init?.headers },
+    headers: { "Content-Type": "application/json", "X-Ambit-Key": API_KEY, ...init?.headers },
   });
   if (!res.ok) {
     const detail = await res.text();

@@ -2,12 +2,37 @@
 
 :root {
   --background: #ffffff;
-  --foreground: #171717;
+  --foreground: #0a0a0a;
+
+  /* Single accent — primary actions, links, active nav state only.
+     Never used for status/risk, so the semantic palette below stays legible. */
+  --accent: #4f46e5;
+  --accent-hover: #4338ca;
+  --accent-foreground: #ffffff;
+
+  /* Canonical risk palette — the one place saturated color is allowed to
+     mean something beyond "primary action". Consumed by components/theme.ts,
+     not redefined per-page. */
+  --risk-low: #15803d;
+  --risk-low-bg: #f0fdf4;
+  --risk-medium: #b45309;
+  --risk-medium-bg: #fffbeb;
+  --risk-high: #b91c1c;
+  --risk-high-bg: #fef2f2;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-risk-low: var(--risk-low);
+  --color-risk-low-bg: var(--risk-low-bg);
+  --color-risk-medium: var(--risk-medium);
+  --color-risk-medium-bg: var(--risk-medium-bg);
+  --color-risk-high: var(--risk-high);
+  --color-risk-high-bg: var(--risk-high-bg);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -16,11 +41,22 @@
   :root {
     --background: #0a0a0a;
     --foreground: #ededed;
+
+    --accent: #818cf8;
+    --accent-hover: #a5b4fc;
+    --accent-foreground: #0a0a0a;
+
+    --risk-low: #4ade80;
+    --risk-low-bg: rgba(20, 83, 45, 0.25);
+    --risk-medium: #fbbf24;
+    --risk-medium-bg: rgba(120, 53, 15, 0.25);
+    --risk-high: #f87171;
+    --risk-high-bg: rgba(127, 29, 29, 0.25);
   }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), ui-sans-serif, system-ui, -apple-system, sans-serif;
 }

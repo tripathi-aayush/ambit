@@ -1,9 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { diffLines } from "diff";
+import { ChevronRight, History, RotateCcw } from "lucide-react";
 import { RiskLabel, StatusPill } from "@/components/badges";
+import { actionTypeMeta } from "@/components/actionTypeIcons";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Button } from "@/components/ui/Button";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { ErrorMessage } from "@/components/ui/ErrorMessage";
+import { SkeletonRow } from "@/components/ui/Skeleton";
 import {
   getActionEvents,
   getPlan,
@@ -15,27 +22,28 @@ import {
 } from "@/lib/api";
 
 const REVERTABLE_TYPES = new Set(["file_write", "file_delete"]);
+const RISK_LEVELS = ["low", "medium", "high"] as const;
 
 function DiffView({ action }: { action: Action }) {
   const previous = action.action_metadata.previous_content;
   const current = action.action_type === "file_write" ? action.action_metadata.content : "";
   if (typeof previous !== "string" && typeof current !== "string") {
-    return <p className="text-xs text-neutral-500">No diffable content captured for this action.</p>;
+    return <p className="text-xs text-neutral-500 dark:text-neutral-400">No diffable content captured for this action.</p>;
   }
 
   const parts = diffLines((previous as string) ?? "", (current as string) ?? "");
 
   return (
-    <pre className="max-h-80 overflow-auto rounded-md border border-neutral-200 bg-neutral-50 p-3 text-xs leading-relaxed">
+    <pre className="max-h-80 overflow-auto rounded-md border border-neutral-200 bg-neutral-50 p-3 text-xs leading-relaxed dark:border-neutral-800 dark:bg-neutral-900/40">
       {parts.map((part, i) => (
         <span
           key={i}
           className={
             part.added
-              ? "block bg-green-100 text-green-800"
+              ? "block bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"
               : part.removed
-                ? "block bg-red-100 text-red-800"
-                : "block text-neutral-500"
+                ? "block bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400"
+                : "block text-neutral-500 dark:text-neutral-400"
           }
         >
           {part.value
@@ -59,6 +67,8 @@ function ActionRow({ action, onChanged }: { action: Action; onChanged: () => voi
   const [rollingBack, setRollingBack] = useState(false);
   const [rollbackMessage, setRollbackMessage] = useState<string | null>(null);
   const [repoId, setRepoId] = useState<string | null>(null);
+
+  const { icon: Icon } = actionTypeMeta(action.action_type);
 
   const toggle = async () => {
     const next = !expanded;
@@ -100,12 +110,20 @@ function ActionRow({ action, onChanged }: { action: Action; onChanged: () => voi
   };
 
   return (
-    <div className="border-b border-neutral-100 py-3">
-      <button onClick={toggle} className="flex w-full items-center justify-between gap-3 text-left text-sm">
+    <div className="border-b border-neutral-100 py-3 dark:border-neutral-900">
+      <button
+        onClick={toggle}
+        className="flex w-full items-center justify-between gap-3 rounded-md text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      >
         <div className="flex min-w-0 items-center gap-3">
-          <span className="shrink-0 font-mono text-xs text-neutral-400">{new Date(action.created_at).toLocaleString()}</span>
-          <span className="shrink-0 font-medium">{action.action_type}</span>
-          <span className="truncate text-neutral-600">{action.target || "(auto)"}</span>
+          <ChevronRight
+            className={`h-3.5 w-3.5 shrink-0 text-neutral-300 transition-transform dark:text-neutral-600 ${expanded ? "rotate-90" : ""}`}
+            strokeWidth={2}
+          />
+          <span className="shrink-0 font-mono text-xs text-neutral-400 dark:text-neutral-500">{new Date(action.created_at).toLocaleString()}</span>
+          <Icon className="h-3.5 w-3.5 shrink-0 text-neutral-400 dark:text-neutral-500" strokeWidth={2} />
+          <span className="shrink-0 font-medium text-neutral-900 dark:text-neutral-100">{action.action_type}</span>
+          <span className="truncate text-neutral-600 dark:text-neutral-400">{action.target || "(auto)"}</span>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <RiskLabel level={action.risk_level} score={action.risk_score} className="text-xs" />
@@ -114,14 +132,17 @@ function ActionRow({ action, onChanged }: { action: Action; onChanged: () => voi
       </button>
 
       {expanded && (
-        <div className="mt-3 space-y-3 pl-4 text-xs">
-          <p className="text-neutral-600">
+        <div className="mt-3 space-y-3 pl-9 text-xs">
+          <p className="text-neutral-600 dark:text-neutral-400">
             {String(action.action_metadata.description ?? "")} — via {action.actor_adapter} / {action.actor_agent_name}
             {action.environment !== "dev" && ` (${action.environment})`}
           </p>
 
           {repoId && action.plan_id && (
-            <Link href={`/repos/${repoId}/tasks`} className="text-blue-700 hover:underline">
+            <Link
+              href={`/repos/${repoId}/tasks`}
+              className="inline-block rounded text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            >
               View plan in Tasks →
             </Link>
           )}
@@ -131,15 +152,15 @@ function ActionRow({ action, onChanged }: { action: Action; onChanged: () => voi
           )}
 
           <div>
-            <h3 className="mb-1 font-semibold text-neutral-700">Audit trail</h3>
-            {events === null && <p className="text-neutral-400">Loading…</p>}
-            {events && events.length === 0 && <p className="text-neutral-400">No events.</p>}
+            <h3 className="mb-1 font-semibold text-neutral-700 dark:text-neutral-300">Audit trail</h3>
+            {events === null && <p className="text-neutral-400 dark:text-neutral-500">Loading…</p>}
+            {events && events.length === 0 && <p className="text-neutral-400 dark:text-neutral-500">No events.</p>}
             {events && (
               <ul className="space-y-1">
                 {events.map((e) => (
-                  <li key={e.id} className="text-neutral-600">
-                    <span className="font-mono text-neutral-400">{new Date(e.created_at).toLocaleTimeString()}</span>{" "}
-                    <span className="font-medium">{e.event_type}</span>
+                  <li key={e.id} className="text-neutral-600 dark:text-neutral-400">
+                    <span className="font-mono text-neutral-400 dark:text-neutral-500">{new Date(e.created_at).toLocaleTimeString()}</span>{" "}
+                    <span className="font-medium text-neutral-800 dark:text-neutral-200">{e.event_type}</span>
                     {e.event_type === "risk_scored" && ` — ${(e.payload.reasons as string[])?.join("; ")}`}
                     {e.event_type === "policy_evaluated" &&
                       ` — allow: ${e.payload.allow}, requires approval: ${e.payload.require_approval}`}
@@ -154,14 +175,11 @@ function ActionRow({ action, onChanged }: { action: Action; onChanged: () => voi
 
           {REVERTABLE_TYPES.has(action.action_type) && action.status === "completed" && (
             <div>
-              <button
-                onClick={handleRollback}
-                disabled={rollingBack}
-                className="rounded border border-neutral-300 px-2 py-1 text-xs disabled:opacity-50"
-              >
+              <Button variant="secondary" size="sm" onClick={handleRollback} loading={rollingBack}>
+                {!rollingBack && <RotateCcw className="h-3 w-3" strokeWidth={2} />}
                 {rollingBack ? "Reverting…" : "Revert this action"}
-              </button>
-              {rollbackMessage && <p className="mt-1 text-neutral-600">{rollbackMessage}</p>}
+              </Button>
+              {rollbackMessage && <p className="mt-1 text-neutral-600 dark:text-neutral-400">{rollbackMessage}</p>}
             </div>
           )}
         </div>
@@ -173,6 +191,7 @@ function ActionRow({ action, onChanged }: { action: Action; onChanged: () => voi
 export default function TimelinePage() {
   const [actions, setActions] = useState<Action[]>([]);
   const [statusFilter, setStatusFilter] = useState<ActionStatus | "all">("all");
+  const [riskFilter, setRiskFilter] = useState<(typeof RISK_LEVELS)[number] | "all">("all");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -189,49 +208,76 @@ export default function TimelinePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFilter]);
 
+  const visibleActions = useMemo(
+    () => (riskFilter === "all" ? actions : actions.filter((a) => a.risk_level === riskFilter)),
+    [actions, riskFilter]
+  );
+
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col px-6 py-8">
-      <header className="mb-4 border-b border-neutral-200 pb-4">
-        <Link href="/" className="text-xs text-neutral-500 hover:underline">
-          ← All repositories
-        </Link>
-        <div className="flex items-center justify-between">
-          <h1 className="text-lg font-semibold">Timeline</h1>
-          <Link href="/analytics" className="text-sm text-neutral-500 hover:underline">
-            Analytics →
-          </Link>
-        </div>
-        <p className="mt-1 text-sm text-neutral-500">
-          Every action across every adapter — risk flags, approvals, and execution outcomes.
-        </p>
-      </header>
+      <PageHeader
+        title="Timeline"
+        description="Every action across every adapter — risk flags, approvals, and execution outcomes."
+      />
 
-      <div className="mb-3 flex items-center gap-2 text-sm">
-        <label htmlFor="status-filter" className="text-neutral-500">
-          Filter:
-        </label>
-        <select
-          id="status-filter"
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value as ActionStatus | "all")}
-          className="rounded-md border border-neutral-300 px-2 py-1 text-sm"
-        >
-          <option value="all">all</option>
-          <option value="pending">pending</option>
-          <option value="approved">approved</option>
-          <option value="executing">executing</option>
-          <option value="completed">completed</option>
-          <option value="failed">failed</option>
-          <option value="denied">denied</option>
-        </select>
+      <div className="mb-3 flex items-center gap-4 text-sm">
+        <div className="flex items-center gap-2">
+          <label htmlFor="status-filter" className="text-neutral-500 dark:text-neutral-400">
+            Status
+          </label>
+          <select
+            id="status-filter"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as ActionStatus | "all")}
+            className="rounded-md border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-900"
+          >
+            <option value="all">all</option>
+            <option value="pending">pending</option>
+            <option value="approved">approved</option>
+            <option value="executing">executing</option>
+            <option value="completed">completed</option>
+            <option value="failed">failed</option>
+            <option value="denied">denied</option>
+          </select>
+        </div>
+        <div className="flex items-center gap-2">
+          <label htmlFor="risk-filter" className="text-neutral-500 dark:text-neutral-400">
+            Risk
+          </label>
+          <select
+            id="risk-filter"
+            value={riskFilter}
+            onChange={(e) => setRiskFilter(e.target.value as (typeof RISK_LEVELS)[number] | "all")}
+            className="rounded-md border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-900"
+          >
+            <option value="all">all</option>
+            {RISK_LEVELS.map((level) => (
+              <option key={level} value={level}>
+                {level}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
-      {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
-      {loading && <p className="text-sm text-neutral-400">Loading…</p>}
-      {!loading && actions.length === 0 && <p className="text-sm text-neutral-500">No actions yet.</p>}
+      {error && (
+        <div className="mb-4">
+          <ErrorMessage>{error}</ErrorMessage>
+        </div>
+      )}
+      {loading && (
+        <div className="space-y-2">
+          <SkeletonRow />
+          <SkeletonRow />
+          <SkeletonRow />
+        </div>
+      )}
+      {!loading && visibleActions.length === 0 && (
+        <EmptyState icon={History} title="No actions match" description="Nothing here yet for this filter combination." />
+      )}
 
       <div>
-        {actions.map((a) => (
+        {visibleActions.map((a) => (
           <ActionRow key={a.id} action={a} onChanged={refresh} />
         ))}
       </div>

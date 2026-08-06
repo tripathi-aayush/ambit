@@ -1,15 +1,46 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { FolderGit2, GitBranch } from "lucide-react";
 import { createRepo, listRepos, type Repository } from "@/lib/api";
+import { RepoStatusPill } from "@/components/badges";
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { ErrorMessage } from "@/components/ui/ErrorMessage";
+import { SkeletonRow } from "@/components/ui/Skeleton";
 
-const STATUS_STYLES: Record<Repository["status"], string> = {
-  pending: "bg-neutral-200 text-neutral-700",
-  processing: "bg-amber-100 text-amber-800",
-  ready: "bg-emerald-100 text-emerald-800",
-  failed: "bg-red-100 text-red-800",
-};
+const ACTIVE_STATUSES = new Set<Repository["status"]>(["pending", "processing"]);
+
+function IngestForm({
+  cloneUrl,
+  setCloneUrl,
+  submitting,
+  onSubmit,
+  compact = false,
+}: {
+  cloneUrl: string;
+  setCloneUrl: (v: string) => void;
+  submitting: boolean;
+  onSubmit: (e: React.FormEvent) => void;
+  compact?: boolean;
+}) {
+  return (
+    <form onSubmit={onSubmit} className={`flex gap-2 ${compact ? "" : "w-full max-w-md"}`}>
+      <input
+        type="text"
+        value={cloneUrl}
+        onChange={(e) => setCloneUrl(e.target.value)}
+        placeholder="https://github.com/owner/repo.git"
+        className="flex-1 rounded-md border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-accent focus:ring-1 focus:ring-accent dark:border-neutral-700 dark:bg-neutral-900"
+      />
+      <Button type="submit" loading={submitting}>
+        {submitting ? "Starting…" : "Ingest"}
+      </Button>
+    </form>
+  );
+}
 
 export default function HomePage() {
   const [repos, setRepos] = useState<Repository[]>([]);
@@ -17,10 +48,20 @@ export default function HomePage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const refresh = async () => {
     try {
-      setRepos(await listRepos());
+      const next = await listRepos();
+      setRepos(next);
+
+      const stillActive = next.some((r) => ACTIVE_STATUSES.has(r.status));
+      if (stillActive && intervalRef.current === null) {
+        intervalRef.current = setInterval(refresh, 4000);
+      } else if (!stillActive && intervalRef.current !== null) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -29,12 +70,11 @@ export default function HomePage() {
   };
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      refresh();
-    }, 4000);
     // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount; refresh() awaits before setting state
     refresh();
-    return () => clearInterval(interval);
+    return () => {
+      if (intervalRef.current !== null) clearInterval(intervalRef.current);
+    };
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -53,69 +93,69 @@ export default function HomePage() {
     }
   };
 
+  const hasRepos = repos.length > 0;
+
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 px-6 py-16">
       <header>
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-semibold tracking-tight">Ambit</h1>
-          <div className="flex gap-4 text-sm">
-            <Link href="/timeline" className="text-neutral-500 hover:underline">
-              Timeline →
-            </Link>
-            <Link href="/analytics" className="text-neutral-500 hover:underline">
-              Analytics →
-            </Link>
-          </div>
-        </div>
-        <p className="mt-1 text-sm text-neutral-500">
-          Ingest a repository, then chat with it once it&apos;s ready.
+        <h1 className="text-2xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-100">Repositories</h1>
+        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+          Ingest a repository, then chat with it, generate plans, and review every change once it&apos;s ready.
         </p>
       </header>
 
-      <form onSubmit={handleSubmit} className="flex gap-2">
-        <input
-          type="text"
-          value={cloneUrl}
-          onChange={(e) => setCloneUrl(e.target.value)}
-          placeholder="https://github.com/owner/repo.git"
-          className="flex-1 rounded-md border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-neutral-500"
-        />
-        <button
-          type="submit"
-          disabled={submitting}
-          className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-        >
-          {submitting ? "Starting…" : "Ingest"}
-        </button>
-      </form>
+      {hasRepos && (
+        <IngestForm cloneUrl={cloneUrl} setCloneUrl={setCloneUrl} submitting={submitting} onSubmit={handleSubmit} compact />
+      )}
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <ErrorMessage>{error}</ErrorMessage>}
 
       <section className="flex flex-col gap-2">
-        {loading && <p className="text-sm text-neutral-500">Loading…</p>}
-        {!loading && repos.length === 0 && (
-          <p className="text-sm text-neutral-500">No repositories yet — ingest one above.</p>
+        {loading && (
+          <div className="space-y-2">
+            <SkeletonRow />
+            <SkeletonRow />
+          </div>
         )}
-        {repos.map((repo) => (
-          <Link
-            key={repo.id}
-            href={repo.status === "ready" ? `/repos/${repo.id}` : "#"}
-            className={`flex items-center justify-between rounded-md border border-neutral-200 px-4 py-3 ${
-              repo.status === "ready" ? "hover:border-neutral-400" : "cursor-default opacity-80"
-            }`}
-          >
-            <div>
-              <p className="text-sm font-medium">{repo.name}</p>
-              <p className="text-xs text-neutral-500">{repo.clone_url}</p>
-              {repo.frameworks.length > 0 && (
-                <p className="mt-1 text-xs text-neutral-400">{repo.frameworks.join(", ")}</p>
-              )}
-            </div>
-            <span className={`rounded-full px-2 py-1 text-xs font-medium ${STATUS_STYLES[repo.status]}`}>
-              {repo.status}
-            </span>
-          </Link>
-        ))}
+
+        {!loading && !hasRepos && (
+          <EmptyState
+            icon={FolderGit2}
+            title="No repositories yet"
+            description="Ingest a GitHub repository to start chatting with it, generating plans, and governing every change Ambit makes."
+            action={
+              <div className="mt-2">
+                <IngestForm cloneUrl={cloneUrl} setCloneUrl={setCloneUrl} submitting={submitting} onSubmit={handleSubmit} />
+              </div>
+            }
+          />
+        )}
+
+        {!loading &&
+          repos.map((repo) => (
+            <Link
+              key={repo.id}
+              href={repo.status === "ready" ? `/repos/${repo.id}` : "#"}
+              className="block rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 dark:focus-visible:ring-offset-neutral-950"
+            >
+              <Card hoverable={repo.status === "ready"} className={`flex items-center justify-between ${repo.status !== "ready" ? "opacity-80" : ""}`}>
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-neutral-100 text-neutral-400 dark:bg-neutral-800 dark:text-neutral-500">
+                    <GitBranch className="h-4 w-4" strokeWidth={2} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-neutral-900 dark:text-neutral-100">{repo.name}</p>
+                    <p className="truncate text-xs text-neutral-500 dark:text-neutral-400">{repo.clone_url}</p>
+                    <p className="mt-1 text-xs text-neutral-400 dark:text-neutral-500">
+                      {repo.frameworks.length > 0 && `${repo.frameworks.join(", ")} · `}
+                      Added {new Date(repo.created_at).toLocaleDateString()}
+                    </p>
+                  </div>
+                </div>
+                <RepoStatusPill status={repo.status} />
+              </Card>
+            </Link>
+          ))}
       </section>
     </div>
   );
