@@ -3,6 +3,9 @@ create -> risk score -> policy check -> auto-decide or queue for approval.
 Every step is recorded in the append-only events table.
 """
 
+import uuid
+
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import policy, risk
@@ -81,12 +84,30 @@ async def submit_action(session: AsyncSession, action_in: ActionObject) -> Actio
 
 
 async def decide_approval(
-    session: AsyncSession, action: Action, approver: str, decision: str, reason: str | None
-) -> Action:
+    session: AsyncSession, action_id: uuid.UUID, approver: str, decision: str, reason: str | None
+) -> Action | None:
+    """Sprint 1 / audit C3: the status transition is the single atomic
+    UPDATE below (WHERE status = 'pending'), not a separate read-then-
+    write -- Postgres row-locks the matching row for the duration of a
+    concurrent UPDATE, so of two racing decisions on the same action,
+    only one can ever match and return a row. Returns None if the action
+    doesn't exist or was no longer pending (already decided by someone
+    else, possibly a moment ago) -- callers turn that into a 404/409, not
+    a silent partial success.
+    """
     from app.db.models import Approval
 
+    result = await session.execute(
+        update(Action)
+        .where(Action.id == action_id, Action.status == "pending")
+        .values(status=decision)
+        .returning(Action)
+    )
+    action = result.scalar_one_or_none()
+    if action is None:
+        return None
+
     session.add(Approval(action_id=action.id, approver=approver, decision=decision, reason=reason))
-    action.status = decision
     await record_event(
         session,
         action.id,

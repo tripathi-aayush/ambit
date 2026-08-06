@@ -134,6 +134,15 @@ class Repository(Base):
     files: Mapped[list["File"]] = relationship(back_populates="repository", cascade="all, delete-orphan")
     repo_chunks: Mapped[list["RepoChunk"]] = relationship(cascade="all, delete-orphan")
     doc: Mapped["RepositoryDoc"] = relationship(cascade="all, delete-orphan", uselist=False)
+    # Sprint 2 / audit H3: was missing entirely -- Plan.repository_id had
+    # no back-populated relationship, so deleting a Repository never
+    # cascaded to its Plans (which would then block the delete with a raw
+    # FK violation instead). DependencyEdge and Plan.reverts_action_id are
+    # deliberately NOT modeled as relationships here and are handled with
+    # explicit statements in the DELETE /repos/{id} handler instead -- see
+    # that handler's comment for why (cross-relationship FK ordering that
+    # SQLAlchemy's cascade sorter can't resolve on its own).
+    plans: Mapped[list["Plan"]] = relationship(cascade="all, delete-orphan")
 
 
 class File(Base):

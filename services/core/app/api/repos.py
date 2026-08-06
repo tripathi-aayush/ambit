@@ -1,16 +1,21 @@
 import asyncio
+import shutil
 import uuid
+from contextlib import AsyncExitStack
+from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from sqlalchemy import select
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.architecture import generate_architecture_doc
-from app.db.models import Chunk, DependencyEdge, File, Repository, RepositoryDoc
+from app.config import settings
+from app.db.models import Chunk, DependencyEdge, File, Plan, Repository, RepositoryDoc
 from app.db.session import get_session
 from app.embeddings import embed_query
-from app.ingestion.pipeline import create_pending_repository, run_ingestion
+from app.executor import get_plan_lock
+from app.ingestion.pipeline import create_pending_repository, find_repo_by_clone_url, run_ingestion
 from app.rag import answer_question
 from app.schemas import (
     ChatRequest,
@@ -33,6 +38,22 @@ async def create_repo(
     background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_session),
 ):
+    # Sprint 2 / audit H5: return the existing repository instead of
+    # re-cloning/re-embedding/re-indexing the same URL. A previously
+    # *failed* ingestion is retried in place (resubmitting the same URL to
+    # retry was the only way to recover before this fix -- preserved
+    # rather than replaced with something new); anything else (ready,
+    # pending, processing) is returned as-is with no new work triggered.
+    existing = await find_repo_by_clone_url(session, body.clone_url)
+    if existing is not None:
+        if existing.status == "failed":
+            existing.status = "pending"
+            existing.error = None
+            await session.commit()
+            await session.refresh(existing)
+            background_tasks.add_task(run_ingestion, existing.id)
+        return existing
+
     repository = await create_pending_repository(session, body.clone_url)
     background_tasks.add_task(run_ingestion, repository.id)
     return repository
@@ -54,6 +75,56 @@ async def _get_repo_or_404(repo_id: uuid.UUID, session: AsyncSession) -> Reposit
 @router.get("/{repo_id}", response_model=RepositoryResponse)
 async def get_repo(repo_id: uuid.UUID, session: AsyncSession = Depends(get_session)):
     return await _get_repo_or_404(repo_id, session)
+
+
+@router.delete("/{repo_id}", status_code=204)
+async def delete_repo(repo_id: uuid.UUID, session: AsyncSession = Depends(get_session)):
+    """Sprint 2 / audit H3: deletes the repository and everything under
+    it -- files/chunks/symbols/summaries/ownership, its architecture doc,
+    and all of its plans (with their actions/events/approvals), then
+    removes the on-disk clone and each plan's working directory.
+
+    Two things aren't modeled as ORM relationships and are cleared
+    explicitly, first, before the cascade delete below: DependencyEdge
+    (has its own FKs to files.id that the cascade sorter doesn't know
+    about) and Plan.reverts_action_id (a revert plan can point at an
+    action belonging to a *different* plan of this same repo -- if that
+    plan hasn't been deleted yet when its target action is, that's an FK
+    violation the ORM's automatic ordering won't catch, since it only
+    orders around declared relationships)."""
+    repo = await session.get(Repository, repo_id, options=[selectinload(Repository.plans)])
+    if repo is None:
+        raise HTTPException(status_code=404, detail="repository not found")
+
+    plan_ids = [p.id for p in repo.plans]
+    local_path = repo.local_path
+
+    # Never delete a plan out from under an in-flight execution (or start
+    # executing one mid-delete) -- same per-plan lock run_ready_actions
+    # holds (sprint 2 / audit H2).
+    async with AsyncExitStack() as stack:
+        for pid in sorted(plan_ids):
+            await stack.enter_async_context(get_plan_lock(pid))
+
+        await session.execute(update(Plan).where(Plan.repository_id == repo_id).values(reverts_action_id=None))
+        await session.execute(delete(DependencyEdge).where(DependencyEdge.repository_id == repo_id))
+        await session.delete(repo)
+        await session.commit()
+
+    # Filesystem cleanup happens after the DB commit succeeds.
+    # ignore_errors=True: the repo is already gone from the app's
+    # perspective at this point, which is the part that matters -- a
+    # leftover directory (permission error, already gone, etc.) is just
+    # wasted disk space, recoverable by hand, not worth failing the
+    # request over.
+    if local_path:
+        await asyncio.to_thread(shutil.rmtree, Path(local_path), ignore_errors=True)
+    for pid in plan_ids:
+        await asyncio.to_thread(shutil.rmtree, Path(settings.plans_dir) / str(pid), ignore_errors=True)
+
+    return Response(status_code=204)
+
+    return Response(status_code=204)
 
 
 @router.get("/{repo_id}/files", response_model=list[FileResponse])

@@ -1,8 +1,15 @@
+import re
 import uuid
 from datetime import datetime
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
+
+# Sprint 1 / audit C5: only plain HTTPS github.com URLs. An allowlist
+# (rather than blocking specific bad patterns like a leading '-', file://,
+# ext::) covers unknown-future-bypass variants too, since anything not
+# matching this exact shape is rejected regardless of what it says.
+GITHUB_HTTPS_URL_RE = re.compile(r"^https://github\.com/[\w.-]+/[\w.-]+(?:\.git)?/?$")
 
 
 class ActionResponse(BaseModel):
@@ -62,6 +69,16 @@ class ApprovalDecisionRequest(BaseModel):
 
 class RepoIngestRequest(BaseModel):
     clone_url: str
+
+    @field_validator("clone_url")
+    @classmethod
+    def _validate_clone_url(cls, value: str) -> str:
+        # Rejects a leading '-' (git argument injection), file://, ext::,
+        # and any other scheme -- validated here, before any Repository
+        # row or clone operation is created, not defensively later.
+        if not GITHUB_HTTPS_URL_RE.match(value):
+            raise ValueError("clone_url must be a plain https://github.com/<owner>/<repo> URL")
+        return value
 
 
 class RepositoryResponse(BaseModel):

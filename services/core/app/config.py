@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     sandbox_container_name: str = "ambit-sandbox-1"
     plans_dir: str = "./.data/plans"
 
+    # Sprint 1 / audit C1: shared-secret API key, checked on every request
+    # (see app/auth.py). No per-user identity yet -- that's future work.
+    ambit_api_key: str = ""
+
     @property
     def groq_api_keys(self) -> list[str]:
         keys = [self.groq_api_key] + self.groq_api_keys_extra.split(",")

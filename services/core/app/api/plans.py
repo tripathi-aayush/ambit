@@ -1,13 +1,17 @@
+import asyncio
+import shutil
 import uuid
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Response
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.db.models import Plan, Repository
+from app.config import settings
+from app.db.models import Action, Plan, Repository
 from app.db.session import get_session
-from app.executor import run_ready_actions
+from app.executor import get_plan_lock, run_ready_actions
 from app.models.action import Environment
 from app.planner import generate_plan
 from app.schemas import PlanCreateRequest, PlanResponse
@@ -59,3 +63,28 @@ async def list_plans(repo_id: uuid.UUID, session: AsyncSession = Depends(get_ses
 @router.get("/plans/{plan_id}", response_model=PlanResponse)
 async def get_plan(plan_id: uuid.UUID, session: AsyncSession = Depends(get_session)):
     return await _get_plan_or_404(plan_id, session)
+
+
+@router.delete("/plans/{plan_id}", status_code=204)
+async def delete_plan(plan_id: uuid.UUID, session: AsyncSession = Depends(get_session)):
+    """Sprint 2 / audit H3: deletes one plan (and its actions/events/
+    approvals via cascade) without touching its repository, then removes
+    its working directory."""
+    plan = await session.get(Plan, plan_id)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="plan not found")
+
+    async with get_plan_lock(plan_id):
+        # A revert plan elsewhere may point at one of this plan's actions
+        # via reverts_action_id -- clear those first, same reasoning as
+        # DELETE /repos/{id} (see that handler's comment).
+        await session.execute(
+            update(Plan)
+            .where(Plan.reverts_action_id.in_(select(Action.id).where(Action.plan_id == plan_id)))
+            .values(reverts_action_id=None)
+        )
+        await session.delete(plan)
+        await session.commit()
+
+    await asyncio.to_thread(shutil.rmtree, Path(settings.plans_dir) / str(plan_id), ignore_errors=True)
+    return Response(status_code=204)

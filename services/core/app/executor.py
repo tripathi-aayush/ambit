@@ -12,8 +12,10 @@ via `docker exec` into the already-running sandbox container, rather than
 running on the host.
 """
 
+import asyncio
 import json
 import subprocess
+import uuid
 from pathlib import Path
 
 from sqlalchemy import select
@@ -27,9 +29,50 @@ from app.pr_description import build_pr_body
 
 SANDBOX_EXEC_OVERHEAD = 15  # slack added on top of runner.py's own --timeout, for the docker-exec hop itself
 
+# Sprint 2 / audit H2: one lock per plan, serializing anything that
+# touches its execution. run_ready_actions() acquires this for its whole
+# body, so two concurrent triggers for the same plan (e.g. two approvals
+# landing close together, or a retried request) can't both act on the
+# same ready action -- the second simply waits its turn and then re-reads
+# fresh state, rather than racing the first. Deletion (api/repos.py,
+# api/plans.py -- sprint 2 H3) acquires the same lock before removing
+# anything, so a plan can never be mid-execution and mid-delete at once.
+#
+# asyncio.Lock only coordinates within one process/event loop -- correct
+# for this single-process deployment (confirmed: no --workers, no
+# multi-process setup anywhere in this project), but would NOT be
+# sufficient if that ever changes to multiple processes/workers, which
+# would need a DB-level lock instead. Entries are never removed: one
+# Lock object per plan for the life of the process is a few dozen bytes,
+# bounded by total plans ever created in this process's lifetime --
+# negligible, not worth reference-counted cleanup for this sprint.
+_plan_locks: dict[uuid.UUID, asyncio.Lock] = {}
+
+
+def get_plan_lock(plan_id: uuid.UUID) -> asyncio.Lock:
+    lock = _plan_locks.get(plan_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _plan_locks[plan_id] = lock
+    return lock
+
 
 class ExecutionError(Exception):
     pass
+
+
+def _resolve_target(wd: Path, target: str) -> Path:
+    """Joins `target` onto the plan's working directory and rejects
+    anything that escapes it -- either `../` traversal or an absolute
+    path, which `Path.__truediv__` would otherwise silently let override
+    `wd` entirely. Sprint 1 / audit C2. Raises ExecutionError (caught the
+    same way any other execution failure is) rather than letting a bad
+    target write/delete outside the sandboxed clone."""
+    resolved = (wd / target).resolve()
+    wd_resolved = wd.resolve()
+    if not resolved.is_relative_to(wd_resolved):
+        raise ExecutionError(f"target path '{target}' escapes the plan working directory")
+    return resolved
 
 
 def _working_dir(plan: Plan) -> Path:
@@ -78,10 +121,47 @@ def _run_in_sandbox(
     return json.loads(result.stdout)
 
 
+def _do_git_commit(wd: Path, message: str) -> dict:
+    """Sprint 2 / audit H1: entirely synchronous (git subprocess calls) --
+    call via asyncio.to_thread, never directly from async code. Behavior
+    unchanged from before this was extracted out of _run_action, just
+    moved off the event loop."""
+    add = subprocess.run(["git", "add", "-A"], cwd=str(wd), capture_output=True, text=True)
+    if add.returncode != 0:
+        raise ExecutionError(f"git add failed: {add.stderr}")
+    status = subprocess.run(["git", "status", "--porcelain"], cwd=str(wd), capture_output=True, text=True)
+    if not status.stdout.strip():
+        return {"note": "nothing to commit"}
+    commit = subprocess.run(["git", "commit", "-m", message], cwd=str(wd), capture_output=True, text=True)
+    if commit.returncode != 0:
+        raise ExecutionError(f"git commit failed: {commit.stderr}")
+    sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=str(wd), capture_output=True, text=True, check=True
+    ).stdout.strip()
+    return {"commit_output": commit.stdout, "commit_sha": sha}
+
+
+def _do_git_push(wd: Path, plan_branch: str, base_branch: str, clone_url: str, token: str) -> dict | None:
+    """Sprint 2 / audit H1: synchronous git subprocess calls (the diff
+    precheck + the actual push) -- call via asyncio.to_thread. Returns a
+    "nothing to push" output dict if there's nothing new (same early-exit
+    as before extraction), else None, meaning the caller should proceed to
+    (async) PR creation. Raises subprocess.CalledProcessError on a failed
+    push, exactly as push_branch() already did -- caller's except clause
+    is unchanged."""
+    diff_count = subprocess.run(
+        ["git", "rev-list", f"{base_branch}..HEAD", "--count"], cwd=str(wd), capture_output=True, text=True
+    )
+    if diff_count.returncode == 0 and diff_count.stdout.strip() == "0":
+        return {"note": f"nothing to push — branch already matches '{base_branch}'"}
+    push_branch(wd, plan_branch, clone_url, token)
+    return None
+
+
 async def _run_action(session: AsyncSession, action: Action, wd: Path, plan: Plan, repo: Repository) -> dict:
     """Returns an output payload to record on success; raises ExecutionError on failure."""
     if action.action_type == "file_write":
-        target = wd / action.target
+        target = _resolve_target(wd, action.target)
         previous_content = target.read_text(encoding="utf-8") if target.exists() else None
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(action.action_metadata["content"], encoding="utf-8")
@@ -93,7 +173,7 @@ async def _run_action(session: AsyncSession, action: Action, wd: Path, plan: Pla
         return {"wrote_bytes": len(action.action_metadata["content"])}
 
     if action.action_type == "file_delete":
-        target = wd / action.target
+        target = _resolve_target(wd, action.target)
         previous_content = target.read_text(encoding="utf-8") if target.exists() else None
         if target.exists():
             target.unlink()
@@ -102,7 +182,8 @@ async def _run_action(session: AsyncSession, action: Action, wd: Path, plan: Pla
 
     if action.action_type == "shell_exec":
         is_test_run = action.action_metadata.get("purpose") == "test_run"
-        result = _run_in_sandbox(
+        result = await asyncio.to_thread(
+            _run_in_sandbox,
             action.target,
             image=action.action_metadata.get("image"),
             workspace=str(plan.id) if is_test_run else None,
@@ -121,20 +202,10 @@ async def _run_action(session: AsyncSession, action: Action, wd: Path, plan: Pla
 
     if action.action_type == "git_commit":
         message = action.action_metadata.get("commit_message", "Ambit automated change")
-        add = subprocess.run(["git", "add", "-A"], cwd=str(wd), capture_output=True, text=True)
-        if add.returncode != 0:
-            raise ExecutionError(f"git add failed: {add.stderr}")
-        status = subprocess.run(["git", "status", "--porcelain"], cwd=str(wd), capture_output=True, text=True)
-        if not status.stdout.strip():
-            return {"note": "nothing to commit"}
-        commit = subprocess.run(["git", "commit", "-m", message], cwd=str(wd), capture_output=True, text=True)
-        if commit.returncode != 0:
-            raise ExecutionError(f"git commit failed: {commit.stderr}")
-        sha = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=str(wd), capture_output=True, text=True, check=True
-        ).stdout.strip()
-        action.action_metadata = {**action.action_metadata, "commit_sha": sha}
-        return {"commit_output": commit.stdout, "commit_sha": sha}
+        result = await asyncio.to_thread(_do_git_commit, wd, message)
+        if "commit_sha" in result:
+            action.action_metadata = {**action.action_metadata, "commit_sha": result["commit_sha"]}
+        return result
 
     if action.action_type == "git_push":
         if not settings.github_token:
@@ -149,16 +220,14 @@ async def _run_action(session: AsyncSession, action: Action, wd: Path, plan: Pla
         # confusing to surface as a plan failure. Check first, since it's
         # a legitimate outcome (e.g. reverting a change whose forward PR
         # was never merged), not an error.
-        diff_count = subprocess.run(
-            ["git", "rev-list", f"{base_branch}..HEAD", "--count"], cwd=str(wd), capture_output=True, text=True
-        )
-        if diff_count.returncode == 0 and diff_count.stdout.strip() == "0":
-            return {"note": f"nothing to push — branch already matches '{base_branch}'"}
-
         try:
-            push_branch(wd, plan.branch_name, repo.clone_url, settings.github_token)
+            precheck = await asyncio.to_thread(
+                _do_git_push, wd, plan.branch_name, base_branch, repo.clone_url, settings.github_token
+            )
         except subprocess.CalledProcessError as exc:
             raise ExecutionError(f"git push failed: {exc.stderr}") from exc
+        if precheck is not None:
+            return precheck
 
         pr = await create_pull_request(
             settings.github_token,
@@ -179,7 +248,7 @@ async def execute_action(session: AsyncSession, action: Action, plan: Plan, repo
     await record_event(session, action.id, "execution_started", {})
     await session.commit()
 
-    wd = _ensure_working_dir(plan, repo)
+    wd = await asyncio.to_thread(_ensure_working_dir, plan, repo)
 
     try:
         output = await _run_action(session, action, wd, plan, repo)
@@ -197,60 +266,83 @@ async def execute_action(session: AsyncSession, action: Action, plan: Plan, repo
 async def run_ready_actions(session: AsyncSession, plan: Plan) -> None:
     """Executes every currently-unblocked, approved step, then recurses to
     pick up newly-unblocked steps, until the plan is fully executed, blocked
-    on a pending approval, or has failed."""
-    repo = await session.get(Repository, plan.repository_id)
+    on a pending approval, or has failed.
 
-    while True:
-        all_actions = (
-            await session.execute(select(Action).where(Action.plan_id == plan.id))
-        ).scalars().all()
+    Sprint 2 / audit H2: the whole body runs under this plan's lock, so a
+    second concurrent call for the same plan (e.g. two approvals arriving
+    close together) blocks until the first finishes rather than both
+    racing to execute the same ready action -- see get_plan_lock()."""
+    async with get_plan_lock(plan.id):
+        repo = await session.get(Repository, plan.repository_id)
 
-        if any(a.status == "failed" for a in all_actions) and plan.status != "failed":
-            # Reached on re-entry (e.g. approving a sibling step) after a
-            # prior run already failed and returned — the actual error
-            # message from that run was already recorded on plan.error then.
-            plan.status = "failed"
-            await session.commit()
-            return
+        while True:
+            # populate_existing=True: without this, a plain SELECT for a
+            # row this session already has identity-mapped (e.g. from an
+            # earlier iteration, or from this same request's decide_approval
+            # call) returns the cached in-memory object rather than
+            # refreshing it from the row this query just fetched -- so a
+            # second run_ready_actions call (different request, different
+            # session, waiting on the lock above) could still see an
+            # action as "approved" and re-execute it even though the
+            # first call already completed it in the database. Found via
+            # empirical concurrent-approval testing (sprint 2 / audit H2)
+            # -- two sibling actions approved concurrently produced two
+            # execution_started events for the second one, back to back,
+            # confirming the lock alone wasn't enough.
+            all_actions = (
+                await session.execute(
+                    select(Action).where(Action.plan_id == plan.id).execution_options(populate_existing=True)
+                )
+            ).scalars().all()
 
-        if any(a.status == "denied" for a in all_actions):
-            plan.status = "failed"
-            plan.error = "a step was denied by policy"
-            await session.commit()
-            return
+            if any(a.status == "failed" for a in all_actions) and plan.status != "failed":
+                # Reached on re-entry (e.g. approving a sibling step) after a
+                # prior run already failed and returned — the actual error
+                # message from that run was already recorded on plan.error then.
+                plan.status = "failed"
+                await session.commit()
+                return
 
-        completed_ids = {str(a.id) for a in all_actions if a.status == "completed"}
-        ready = [
-            a
-            for a in all_actions
-            if a.status == "approved" and all(dep in completed_ids for dep in a.depends_on)
-        ]
+            if any(a.status == "denied" for a in all_actions):
+                plan.status = "failed"
+                plan.error = "a step was denied by policy"
+                await session.commit()
+                return
 
-        if not ready:
-            break
+            completed_ids = {str(a.id) for a in all_actions if a.status == "completed"}
+            ready = [
+                a
+                for a in all_actions
+                if a.status == "approved" and all(dep in completed_ids for dep in a.depends_on)
+            ]
 
-        failure: str | None = None
-        for action in ready:
-            try:
-                await execute_action(session, action, plan, repo)
-            except Exception as exc:  # noqa: BLE001 - also recorded on the action's event log
-                failure = f"{action.target or action.action_type}: {exc}"
+            if not ready:
                 break
 
-        if failure is not None:
-            plan.status = "failed"
-            plan.error = failure
-            await session.commit()
-            return
+            failure: str | None = None
+            for action in ready:
+                try:
+                    await execute_action(session, action, plan, repo)
+                except Exception as exc:  # noqa: BLE001 - also recorded on the action's event log
+                    failure = f"{action.target or action.action_type}: {exc}"
+                    break
 
-    all_actions = (
-        await session.execute(select(Action).where(Action.plan_id == plan.id))
-    ).scalars().all()
+            if failure is not None:
+                plan.status = "failed"
+                plan.error = failure
+                await session.commit()
+                return
 
-    if all(a.status == "completed" for a in all_actions):
-        plan.status = "completed"
-    elif any(a.status == "pending" for a in all_actions):
-        plan.status = "pending_approval"
-    else:
-        plan.status = "executing"
-    await session.commit()
+        all_actions = (
+            await session.execute(
+                select(Action).where(Action.plan_id == plan.id).execution_options(populate_existing=True)
+            )
+        ).scalars().all()
+
+        if all(a.status == "completed" for a in all_actions):
+            plan.status = "completed"
+        elif any(a.status == "pending" for a in all_actions):
+            plan.status = "pending_approval"
+        else:
+            plan.status = "executing"
+        await session.commit()

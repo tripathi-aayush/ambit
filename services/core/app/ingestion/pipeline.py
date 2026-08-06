@@ -18,6 +18,7 @@ does the heavy lifting in its own DB session and flips status to
 import asyncio
 import uuid
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
@@ -47,8 +48,24 @@ MAX_REPO_CHUNK_CHARS = 4000
 SUMMARY_CONCURRENCY = 5
 
 
+def _normalize_clone_url(clone_url: str) -> str:
+    """Sprint 2 / audit H5: 'https://github.com/a/b', '.../a/b/', and
+    '.../a/b.git' are all the same repository -- normalized once here so
+    both storage (create_pending_repository) and lookup
+    (find_repo_by_clone_url) agree on one canonical form and a plain
+    equality check is enough to detect a duplicate."""
+    return clone_url.rstrip("/").removesuffix(".git")
+
+
+async def find_repo_by_clone_url(session: AsyncSession, clone_url: str) -> Repository | None:
+    normalized = _normalize_clone_url(clone_url)
+    result = await session.execute(select(Repository).where(Repository.clone_url == normalized))
+    return result.scalar_one_or_none()
+
+
 async def create_pending_repository(session: AsyncSession, clone_url: str) -> Repository:
-    name = clone_url.rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")
+    clone_url = _normalize_clone_url(clone_url)
+    name = clone_url.rsplit("/", 1)[-1]
     repository = Repository(clone_url=clone_url, name=name, local_path="", status="pending")
     session.add(repository)
     await session.commit()
@@ -124,7 +141,7 @@ async def _persist_structure(
                 )
             )
 
-    ownership = compute_ownership(local_path)
+    ownership = await asyncio.to_thread(compute_ownership, local_path)
     for path, entries in ownership.items():
         if path not in file_ids:
             continue
@@ -149,7 +166,7 @@ async def run_ingestion(repo_id: uuid.UUID) -> None:
             return
 
         try:
-            local_path = clone_for_ingestion(repository.clone_url)
+            local_path = await asyncio.to_thread(clone_for_ingestion, repository.clone_url)
             repository.local_path = str(local_path)
             repository.status = "processing"
             await session.commit()
@@ -204,7 +221,8 @@ async def run_ingestion(repo_id: uuid.UUID) -> None:
         try:
             repo_chunk_rows: list[tuple[str, str, str, str, str | None]] = []  # type, id, title, content, url
 
-            for commit in get_recent_commits(local_path):
+            recent_commits = await asyncio.to_thread(get_recent_commits, local_path)
+            for commit in recent_commits:
                 content = f"{commit.subject}\n\n{commit.body}".strip()[:MAX_REPO_CHUNK_CHARS]
                 repo_chunk_rows.append(("commit", commit.sha, commit.subject, content, None))
 

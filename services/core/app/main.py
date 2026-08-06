@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -11,10 +11,15 @@ from app.api.github import router as github_router
 from app.api.health import router as health_router
 from app.api.plans import router as plans_router
 from app.api.repos import router as repos_router
+from app.auth import require_api_key
 
 logger = logging.getLogger("ambit")
 
-app = FastAPI(title="Ambit Runtime Core")
+# Global dependency: every route on this app requires a valid X-Ambit-Key
+# header (see app/auth.py, audit finding C1). Applied at the app level
+# rather than per-router so a new router added later is covered by
+# construction, not by remembering to wire it in.
+app = FastAPI(title="Ambit Runtime Core", dependencies=[Depends(require_api_key)])
 
 app.add_middleware(
     CORSMiddleware,
