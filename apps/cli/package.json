@@ -1,0 +1,23 @@
+{
+  "name": "@orion/cli",
+  "version": "0.1.0",
+  "private": true,
+  "bin": {
+    "orion": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@orion/shared": "*",
+    "commander": "^12.1.0",
+    "diff": "^5.2.0",
+    "picocolors": "^1.1.1"
+  },
+  "devDependencies": {
+    "@types/diff": "^5.2.3",
+    "@types/node": "^20",
+    "typescript": "^5"
+  }
+}
